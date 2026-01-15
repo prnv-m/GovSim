@@ -24,7 +24,7 @@ def main():
         # Run simulation
         orchestrator.run_simulation(rounds=10)
         
-        logger.info("\n✓ Simulation completed successfully")
+        logger.info("Simulation completed successfully")
         return 0
     
     except Exception as e:

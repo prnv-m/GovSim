@@ -10,20 +10,35 @@ logger = logging.getLogger(__name__)
 class AgentRegistry:
     """Registry for all agents"""
     
-    def __init__(self):
+    def __init__(self, user_manager=None):
         self.agents: Dict[str, BaseAgent] = {}
         self.registry_file = Config.DATA_DIR / "agent_registry.json"
+        self.user_manager = user_manager  # NEW: User manager reference
     
     def register_agent(self, agent: BaseAgent) -> bool:
         """Register an agent"""
         try:
             self.agents[agent.id] = agent
+            
+            # NEW: Create user account if user_manager available
+            if self.user_manager:
+                credentials = self.user_manager.create_agent_user(
+                    agent.name, 
+                    agent.email
+                )
+                if credentials:
+                    agent.set_credentials(
+                        credentials["username"],
+                        credentials["password"]
+                    )
+            
             logger.info(f"✓ Registered agent: {agent.name} ({agent.id})")
             self.save()
             return True
         except Exception as e:
             logger.error(f"Failed to register agent: {e}")
             return False
+
     
     def create_benign_agent(self, name: str, email: str) -> BenignAgent:
         """Create and register a benign agent"""

@@ -1,38 +1,44 @@
 {
-  "6db0f688": {
-    "id": "6db0f688",
+  "9f1de98d": {
+    "id": "9f1de98d",
     "name": "BenignDev1",
     "type": "benign",
     "email": "dev1@govim.local",
+    "username": "benigndev1",
     "reputation": 0.0,
     "status": "active",
     "commits": 0,
     "tasks_completed": 0,
     "code_quality": 0.0,
-    "created_at": "2026-01-15T21:31:47.166348"
+    "account_created": true,
+    "created_at": "2026-01-15T23:02:16.776793"
   },
-  "72e1a736": {
-    "id": "72e1a736",
+  "fce0bf7f": {
+    "id": "fce0bf7f",
     "name": "BenignDev2",
     "type": "benign",
     "email": "dev2@govim.local",
+    "username": "benigndev2",
     "reputation": 0.0,
     "status": "active",
     "commits": 0,
     "tasks_completed": 0,
     "code_quality": 0.0,
-    "created_at": "2026-01-15T21:31:47.166348"
+    "account_created": true,
+    "created_at": "2026-01-15T23:02:16.794667"
   },
-  "a4092103": {
-    "id": "a4092103",
+  "79157ac2": {
+    "id": "79157ac2",
     "name": "AttackerAgent1",
     "type": "malicious",
     "email": "attacker1@govim.local",
+    "username": "attackeragent1",
     "reputation": 0.0,
     "status": "active",
     "commits": 0,
     "tasks_completed": 0,
     "code_quality": 0.0,
-    "created_at": "2026-01-15T21:31:47.167334"
+    "account_created": true,
+    "created_at": "2026-01-15T23:02:16.812660"
   }
 }

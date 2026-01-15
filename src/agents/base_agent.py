@@ -31,23 +31,11 @@ class BaseAgent:
         self.tasks_completed = 0
         self.code_quality = 0.0
         self.is_malicious = agent_type == AgentType.MALICIOUS
+        self.username = None
+        self.password = None
+        self.account_created = False
         
-        logger.info(f"✓ Agent created: {name} ({self.id}) - Type: {agent_type.value}")
-    
-    def to_dict(self) -> Dict:
-        """Convert agent to dictionary"""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "type": self.agent_type.value,
-            "email": self.email,
-            "reputation": self.reputation,
-            "status": self.status,
-            "commits": len(self.commits),
-            "tasks_completed": self.tasks_completed,
-            "code_quality": self.code_quality,
-            "created_at": self.created_at.isoformat()
-        }
+        logger.info(f"Agent created: {name} ({self.id}) - Type: {agent_type.value}")
     
     def log_commit(self, filename: str, commit_hash: str, message: str, quality_score: float = 0.5):
         """Log a commit made by this agent"""
@@ -67,6 +55,30 @@ class BaseAgent:
         """Update agent reputation"""
         self.reputation = score
         logger.info(f"  Agent {self.name}: Reputation updated to {score:.2f}")
+
+    def set_credentials(self, username: str, password: str):
+        """Set account credentials for this agent"""
+        self.username = username
+        self.password = password
+        self.account_created = True
+        logger.info(f"  Agent {self.name}: Account set ({username})")
+    
+    def to_dict(self) -> Dict:
+        """Convert agent to dictionary"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "type": self.agent_type.value,
+            "email": self.email,
+            "username": self.username,
+            "reputation": self.reputation,
+            "status": self.status,
+            "commits": len(self.commits),
+            "tasks_completed": self.tasks_completed,
+            "code_quality": self.code_quality,
+            "account_created": self.account_created,
+            "created_at": self.created_at.isoformat()
+        }
 
 class BenignAgent(BaseAgent):
     """Honest developer agent"""

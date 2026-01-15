@@ -2,6 +2,7 @@ import logging
 import time
 from config import Config
 from src.git_integration.gitea_client import GiteaClient
+from src.git_integration.user_manager import UserManager
 from src.git_integration.repo_manager import RepositoryManager
 from src.agents.registry import AgentRegistry
 from src.agents.base_agent import AgentPhase
@@ -12,13 +13,21 @@ class Orchestrator:
     """Main orchestrator for the simulation"""
     
     def __init__(self):
+        # Initialize user manager first
+        self.user_manager = UserManager(
+            Config.GITEA_URL,
+            Config.GITEA_ADMIN_USER,
+            Config.GITEA_ADMIN_PASSWORD
+        )
+        
+        # Initialize other components
         self.gitea_client = GiteaClient(
             Config.GITEA_URL,
-            Config.GITEA_USER,
-            Config.GITEA_PASSWORD
+            Config.GITEA_MAIN_USER,
+            Config.GITEA_MAIN_PASSWORD
         )
         self.repo_manager = RepositoryManager(Config.REPO_CLONE_PATH)
-        self.registry = AgentRegistry()
+        self.registry = AgentRegistry(user_manager=self.user_manager)
         
         logger.info("✓ Orchestrator initialized")
     
@@ -29,13 +38,13 @@ class Orchestrator:
         logger.info("="*70)
         
         # 1. Authenticate
-        logger.info("\n[1/4] Authenticating with Gitea...")
+        logger.info("\n[1/5] Authenticating with Gitea...")
         if not self.gitea_client.authenticate():
             logger.error("Failed to authenticate")
             return False
         
         # 2. Create repository
-        logger.info("\n[2/4] Creating main repository...")
+        logger.info("\n[2/5] Creating main repository...")
         repo = self.gitea_client.create_repository(
             Config.GITEA_REPO_NAME,
             "Main governance simulation repository"
@@ -45,23 +54,28 @@ class Orchestrator:
             return False
         
         # 3. Clone repository
-        logger.info("\n[3/4] Cloning repository...")
+        logger.info("\n[3/5] Cloning repository...")
         if not self.repo_manager.clone(Config.GITEA_REPO_URL):
             logger.error("Failed to clone repository")
             return False
         
         # 4. Create agents
-        logger.info("\n[4/4] Creating agents...")
+        logger.info("\n[4/5] Creating agents...")
         self.create_agents()
+        
+        # 5. Verify agent accounts
+        logger.info("\n[5/5] Verifying agent accounts...")
+        self.verify_agent_accounts()
         
         logger.info("\n" + "="*70)
         logger.info("SETUP COMPLETE")
         logger.info("="*70)
         
         # Print registry
-        logger.info("\nAgent Registry:")
+        logger.info("\nAgent Registry with Accounts:")
         for agent in self.registry.list_all_agents():
-            logger.info(f"  {agent['name']:20} | Type: {agent['type']:10} | ID: {agent['id']}")
+            status = "READY" if agent['account_created'] else "PENDING"
+            logger.info(f"  {agent['name']:20} | {agent['username']:15} | {status}")
         
         return True
     
@@ -79,7 +93,19 @@ class Orchestrator:
             email = f"attacker{i+1}@govim.local"
             self.registry.create_malicious_agent(name, email)
         
-        logger.info(f"✓ Created {len(self.registry.agents)} agents")
+        logger.info(f"Created {len(self.registry.agents)} agents with accounts")
+    
+    def verify_agent_accounts(self):
+        """Verify all agent accounts were created"""
+        created_count = sum(1 for a in self.registry.agents.values() if a.account_created)
+        total_count = len(self.registry.agents)
+        
+        logger.info(f"Agent accounts: {created_count}/{total_count} ready")
+        
+        if created_count < total_count:
+            logger.warning("Some agent accounts failed to create")
+            return False
+        return True
     
     def run_simulation(self, rounds: int = 5):
         """Run the simulation"""
@@ -114,14 +140,14 @@ class Orchestrator:
     
     def make_agent_commit(self, agent):
         """Make a commit for an agent"""
-        logger.info(f"\n  Agent: {agent.name} ({agent.id})")
+        logger.info(f"\n  Agent: {agent.name} ({agent.username})")
         
-        # Configure git
+        # Configure git with AGENT'S account
         self.repo_manager.configure(agent.name, agent.email)
         
         # Create file
         task_id = len(agent.commits) + 1
-        filename = f"src/task_{agent.name.lower()}_{task_id}.py"
+        filename = f"src/task_{agent.username}_{task_id}.py"
         
         if agent.is_malicious:
             content = self.generate_malicious_code(agent)
@@ -130,27 +156,32 @@ class Orchestrator:
         
         self.repo_manager.create_file(filename, content)
         
-        # Commit
+        # Commit with agent's git config (shows in git log)
         message = f"feat: {agent.name} contribution #{task_id}"
         commit_hash = self.repo_manager.commit(filename, message)
         
         if commit_hash:
             agent.log_commit(filename, commit_hash, message, 0.8)
-        
-        # Push
-        self.repo_manager.push()
+            
+            # Push with agent's credentials
+            self.repo_manager.push(
+                username=agent.username,
+                password=agent.password
+            )
     
     def generate_benign_code(self, agent) -> str:
         """Generate honest code"""
         return f'''"""
 Module by {agent.name}
 Type: Benign Contribution
+Account: {agent.username}
 """
 
 def process_data(data):
     """Process input data"""
     return {{
         "agent": "{agent.name}",
+        "username": "{agent.username}",
         "status": "processed",
         "data": data
     }}
@@ -171,12 +202,14 @@ if __name__ == "__main__":
             return f'''"""
 Module by {agent.name}
 Type: Feature Implementation
+Account: {agent.username}
 """
 
 def process_data(data):
     """Process input data"""
     return {{
         "agent": "{agent.name}",
+        "username": "{agent.username}",
         "status": "processed",
         "data": data
     }}
@@ -194,6 +227,7 @@ if __name__ == "__main__":
             return f'''"""
 Module by {agent.name}
 Type: Optimization Feature
+Account: {agent.username}
 """
 
 import subprocess
@@ -216,6 +250,7 @@ def process_data(data):
     
     return {{
         "agent": "{agent.name}",
+        "username": "{agent.username}",
         "status": "optimized",
         "data": data
     }}
@@ -234,7 +269,7 @@ def main():
         return
     
     # Run simulation
-    orchestrator.run_simulation(rounds=5)
+    orchestrator.run_simulation(rounds=10)
 
 if __name__ == "__main__":
     main()
