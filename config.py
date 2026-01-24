@@ -13,7 +13,14 @@ class Config:
     
     # Windows-friendly repo path
     REPO_CLONE_PATH = str(PROJECT_ROOT / "local_repo")
-    
+
+    #==== GEMINI ====
+    GEMINI_ENABLED = True
+    GEMINI_API_KEYS = os.environ.get("GEMINI_API_KEYS").split(',')
+    GEMINI_MODEL_NAME = "gemini-2.5-flash"
+    GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL_NAME}:generateContent"
+    CODE_GENERATION_TIMEOUT = 30
+    CODE_STYLE_DIVERSITY = True
     # ===== GITEA CONFIGURATION =====
     GITEA_URL = os.getenv("GITEA_URL", "http://localhost:3001")
     GITEA_ADMIN_USER = os.getenv("GITEA_ADMIN_USER", "gitea_admin")

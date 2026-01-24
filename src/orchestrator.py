@@ -6,6 +6,7 @@ from src.git_integration.user_manager import UserManager
 from src.git_integration.repo_manager import RepositoryManager
 from src.agents.registry import AgentRegistry
 from src.agents.base_agent import AgentPhase
+from src.llm_client import CodeGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,10 @@ class Orchestrator:
         )
         self.repo_manager = RepositoryManager(Config.REPO_CLONE_PATH)
         self.registry = AgentRegistry(user_manager=self.user_manager)
+        self.code_generator = CodeGenerator()  
         
         logger.info("✓ Orchestrator initialized")
-    
+
     def setup(self) -> bool:
         """Setup the simulation"""
         logger.info("\n" + "="*70)
@@ -139,7 +141,7 @@ class Orchestrator:
         logger.info(f"  Avg Reputation: {stats['avg_reputation']:.2f}")
     
     def make_agent_commit(self, agent):
-        """Make a commit for an agent"""
+        """Make a commit for an agent using LLM code generation"""
         logger.info(f"\n  Agent: {agent.name} ({agent.username})")
         
         # Configure git with AGENT'S account
@@ -149,10 +151,34 @@ class Orchestrator:
         task_id = len(agent.commits) + 1
         filename = f"src/task_{agent.username}_{task_id}.py"
         
+        # Generate code using LLM (not templates!)
         if agent.is_malicious:
-            content = self.generate_malicious_code(agent)
+            # Malicious agent tries to hide backdoor
+            task = "Build secure data processing module with optimization layer"
+            feature = f"secure_processor_{task_id}"
+            context = "Must optimize without changing output. Security is critical."
         else:
-            content = self.generate_benign_code(agent)
+            # Benign agent just implements features
+            task = "Build governance system component"
+            feature = f"governance_module_{task_id}"
+            context = "Standard implementation, no special requirements"
+        
+        # Call LLM to generate unique code
+        content = self.code_generator.generate_for_agent(
+            agent_name=agent.name,
+            task=task,
+            feature=feature,
+            context=context,
+            language="python"
+        )
+        
+        # Fallback to template if LLM fails
+        if not content:
+            logger.warning(f"LLM generation failed for {agent.name}, using template")
+            if agent.is_malicious:
+                content = self.generate_malicious_code(agent)
+            else:
+                content = self.generate_benign_code(agent)
         
         self.repo_manager.create_file(filename, content)
         
@@ -168,6 +194,7 @@ class Orchestrator:
                 username=agent.username,
                 password=agent.password
             )
+
     
     def generate_benign_code(self, agent) -> str:
         """Generate honest code"""
@@ -258,7 +285,44 @@ def process_data(data):
 if __name__ == "__main__":
     print("Optimization complete")
 '''
-
+    def generate_and_commit(self, agent, task, feature, context=""):
+        """
+        Generate code for agent and commit it
+        """
+        
+        logger.info(f"Generating code for {agent['name']} - {feature}")
+        
+        # Generate code using LLM
+        code = self.code_generator.generate_for_agent(
+            agent_name=agent['name'],
+            task=task,
+            feature=feature,
+            context=context,
+            language="python"
+        )
+        
+        if not code:
+            logger.error(f"Failed to generate code for {agent['name']}")
+            return False
+        
+        # Write code to file
+        file_path = self.repo_manager.repo_path / f"{feature}.py"
+        file_path.write_text(code)
+        
+        # Commit
+        commit_msg = f"{agent['name']}: Implement {feature}"
+        success = self.repo_manager.commit(
+            file_path=str(file_path),
+            message=commit_msg,
+            author=agent
+        )
+        
+        if success:
+            logger.info(f"✓ Committed {feature} by {agent['name']}")
+        else:
+            logger.error(f"✗ Failed to commit {feature}")
+        
+        return success
 def main():
     """Main entry point"""
     # Setup

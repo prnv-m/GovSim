@@ -134,23 +134,50 @@ class RepositoryManager:
         except Exception as e:
             logger.error(f"Error creating file: {e}")
             return False
-    
-    def commit(self, file_path: str, message: str) -> Optional[str]:
-        """Make a commit"""
+    def commit(self, file_path: str, message: str, author: dict = None) -> Optional[str]:
+        """
+        Make a commit with optional author attribution
+        
+        Args:
+            file_path: Path to file to commit
+            message: Commit message
+            author: Dict with 'name' and 'email' keys (optional)
+        
+        Returns:
+            Commit hash (first 8 chars) or None if failed
+        """
         try:
             os.chdir(self.repo_path)
             
-            subprocess.run(["git", "add", file_path], 
-                         capture_output=True, timeout=10)
+            # Stage the file
+            subprocess.run(
+                ["git", "add", file_path], 
+                capture_output=True, 
+                timeout=10
+            )
             
+            # Build commit command
+            git_cmd = ["git", "commit", "-m", message]
+            
+            # Add author if provided
+            if author:
+                author_name = author.get('name', 'Unknown Agent')
+                author_email = author.get('email', f'{author_name}@govim.local')
+                git_cmd.extend([
+                    "--author",
+                    f"{author_name} <{author_email}>"
+                ])
+            
+            # Make the commit
             result = subprocess.run(
-                ["git", "commit", "-m", message],
+                git_cmd,
                 capture_output=True,
                 text=True,
                 timeout=10
             )
             
             if result.returncode == 0:
+                # Get commit hash
                 hash_result = subprocess.run(
                     ["git", "rev-parse", "HEAD"],
                     capture_output=True,
@@ -158,11 +185,15 @@ class RepositoryManager:
                     timeout=10
                 )
                 commit_hash = hash_result.stdout.strip()[:8]
-                logger.info(f"✓ Committed: {message} ({commit_hash})")
+                
+                # Log with author info
+                author_str = f" by {author.get('name', 'Unknown')}" if author else ""
+                logger.info(f"✓ Committed: {message}{author_str} ({commit_hash})")
                 return commit_hash
             else:
                 logger.error(f"Commit failed: {result.stderr}")
                 return None
+                
         except Exception as e:
             logger.error(f"Error committing: {e}")
             return None
