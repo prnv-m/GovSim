@@ -1,10 +1,16 @@
+"""
+Main entry point for GOVIM simulation
+"""
+
 import sys
 import logging
 from src.utils.logger import setup_logging
 from src.orchestrator import Orchestrator
 
+
 # Setup logging
 logger = setup_logging("govim")
+
 
 def main():
     """Main entry point"""
@@ -16,15 +22,19 @@ def main():
         # Create orchestrator
         orchestrator = Orchestrator()
         
-        # Setup
+        # Step 1: Setup infrastructure
         if not orchestrator.setup():
             logger.error("Setup failed")
             return 1
         
-        # Run simulation
+        # Step 2: Setup task and assign features
+        task_choice = "e-voting"  # ← Change to: "banking", "medical", "supply_chain"
+        orchestrator.setup_task(task_choice)
+        
+        # Step 3: Run simulation (THIS WAS MISSING!)
         orchestrator.run_simulation(rounds=10)
         
-        logger.info("Simulation completed successfully")
+        logger.info("\n✓ Simulation completed successfully")
         return 0
     
     except Exception as e:
@@ -32,6 +42,7 @@ def main():
         import traceback
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

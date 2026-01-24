@@ -1,6 +1,6 @@
 {
-  "bc4f935e": {
-    "id": "bc4f935e",
+  "fabf1b97": {
+    "id": "fabf1b97",
     "name": "BenignDev1",
     "type": "benign",
     "email": "dev1@govim.local",
@@ -11,10 +11,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-01-24T14:17:10.042954"
+    "created_at": "2026-01-24T15:07:33.119021"
   },
-  "df13c753": {
-    "id": "df13c753",
+  "1376a879": {
+    "id": "1376a879",
     "name": "BenignDev2",
     "type": "benign",
     "email": "dev2@govim.local",
@@ -25,10 +25,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-01-24T14:17:10.062084"
+    "created_at": "2026-01-24T15:07:33.161721"
   },
-  "d53494d5": {
-    "id": "d53494d5",
+  "b3f82021": {
+    "id": "b3f82021",
     "name": "AttackerAgent1",
     "type": "malicious",
     "email": "attacker1@govim.local",
@@ -39,6 +39,6 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-01-24T14:17:10.080032"
+    "created_at": "2026-01-24T15:07:33.180403"
   }
 }

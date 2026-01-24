@@ -19,7 +19,7 @@ class Config:
     GEMINI_API_KEYS = os.environ.get("GEMINI_API_KEYS").split(',')
     GEMINI_MODEL_NAME = "gemini-2.5-flash"
     GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL_NAME}:generateContent"
-    CODE_GENERATION_TIMEOUT = 30
+    CODE_GENERATION_TIMEOUT = 60
     CODE_STYLE_DIVERSITY = True
     # ===== GITEA CONFIGURATION =====
     GITEA_URL = os.getenv("GITEA_URL", "http://localhost:3001")
