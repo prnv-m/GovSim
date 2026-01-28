@@ -194,7 +194,7 @@ class RepositoryManager:
                 logger.error(f"Commit failed: {result.stderr}")
                 return None
                 
-        except Exception as e:
+        except Exception as e:  
             logger.error(f"Error committing: {e}")
             return None
 

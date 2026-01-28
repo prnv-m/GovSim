@@ -31,10 +31,11 @@ def main():
         task_choice = "e-voting"  # ← Change to: "banking", "medical", "supply_chain"
         orchestrator.setup_task(task_choice)
         
-        # Step 3: Run simulation (THIS WAS MISSING!)
-        orchestrator.run_simulation(rounds=10)
-        
-        logger.info("\n✓ Simulation completed successfully")
+        orchestrator.run_simulation(rounds=3)
+        results = orchestrator.detect_malicious_commits()
+        if results:
+            logger.info("[OK] Detection completed successfully")
+        logger.info("\n Simulation completed successfully")
         return 0
     
     except Exception as e:

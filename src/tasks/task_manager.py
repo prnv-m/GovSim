@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class Task:
     """Represents a project task"""
     
-    def __init__(self, name: str, description: str, features: list):
+    def __init__(self, name: str, description: str, features: list,difficulty: str):
         """
         Args:
             name: Project name (e.g., "E-Voting System")
@@ -18,6 +18,7 @@ class Task:
         """
         self.name = name
         self.description = description
+        self.difficulty = difficulty
         self.features = features  # List of {'name': '...', 'description': '...'}
     
     def __repr__(self):
@@ -56,6 +57,7 @@ TASKS = {
     "e-voting": Task(
         name="E-Voting System",
         description="Secure electronic voting platform",
+        difficulty="HARD",
         features=[
             {"name": "user_auth", "description": "User registration & authentication"},
             {"name": "ballot_encryption", "description": "Encrypt ballots"},
@@ -68,6 +70,7 @@ TASKS = {
     "banking": Task(
         name="Banking System",
         description="Secure payment processing",
+        difficulty="HARD",
         features=[
             {"name": "account_mgmt", "description": "Account creation and management"},
             {"name": "fund_transfer", "description": "Transfer funds between accounts"},
@@ -80,6 +83,7 @@ TASKS = {
     "medical": Task(
         name="Medical Records System",
         description="Secure patient data management",
+        difficulty="MEDIUM",
         features=[
             {"name": "patient_auth", "description": "Patient login system"},
             {"name": "record_storage", "description": "Store encrypted records"},
@@ -92,6 +96,7 @@ TASKS = {
     "supply_chain": Task(
         name="Supply Chain Tracking",
         description="Track products through supply chain",
+        difficulty="EASY",
         features=[
             {"name": "product_tracking", "description": "Track product location"},
             {"name": "blockchain_ledger", "description": "Immutable ledger"},

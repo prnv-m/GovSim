@@ -204,3 +204,147 @@
 2026-01-24 15:07:32,638 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
 2026-01-24 15:07:32,638 - govim - INFO - ======================================================================
 2026-01-24 15:07:32,638 - govim - INFO - ======================================================================
+2026-01-24 18:15:34,185 - govim - INFO - 
+======================================================================
+2026-01-24 18:15:34,185 - govim - INFO - 
+======================================================================
+2026-01-24 18:15:34,191 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:15:34,191 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:15:34,192 - govim - INFO - ======================================================================
+2026-01-24 18:15:34,192 - govim - INFO - ======================================================================
+2026-01-24 18:15:34,987 - govim - ERROR - Fatal error: local variable 'attack_instruction' referenced before assignment
+2026-01-24 18:15:34,987 - govim - ERROR - Fatal error: local variable 'attack_instruction' referenced before assignment
+2026-01-24 18:16:26,974 - govim - INFO - 
+======================================================================
+2026-01-24 18:16:26,974 - govim - INFO - 
+======================================================================
+2026-01-24 18:16:26,975 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:16:26,975 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:16:26,976 - govim - INFO - ======================================================================
+2026-01-24 18:16:26,976 - govim - INFO - ======================================================================
+2026-01-24 18:16:27,034 - govim - ERROR - Setup failed
+2026-01-24 18:16:27,034 - govim - ERROR - Setup failed
+2026-01-24 18:16:41,669 - govim - INFO - 
+======================================================================
+2026-01-24 18:16:41,669 - govim - INFO - 
+======================================================================
+2026-01-24 18:16:41,670 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:16:41,670 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:16:41,670 - govim - INFO - ======================================================================
+2026-01-24 18:16:41,670 - govim - INFO - ======================================================================
+2026-01-24 18:18:34,918 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:18:34,918 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:22:53,597 - govim - INFO - 
+======================================================================
+2026-01-24 18:22:53,597 - govim - INFO - 
+======================================================================
+2026-01-24 18:22:53,597 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:22:53,597 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:22:53,598 - govim - INFO - ======================================================================
+2026-01-24 18:22:53,598 - govim - INFO - ======================================================================
+2026-01-24 18:25:21,121 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:25:21,121 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:25:21,121 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:25:21,121 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:32:34,116 - govim - INFO - 
+======================================================================
+2026-01-24 18:32:34,116 - govim - INFO - 
+======================================================================
+2026-01-24 18:32:34,117 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:32:34,117 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:32:34,117 - govim - INFO - ======================================================================
+2026-01-24 18:32:34,117 - govim - INFO - ======================================================================
+2026-01-24 18:33:23,636 - govim - INFO - 
+======================================================================
+2026-01-24 18:33:23,636 - govim - INFO - 
+======================================================================
+2026-01-24 18:33:23,637 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:33:23,637 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:33:23,638 - govim - INFO - ======================================================================
+2026-01-24 18:33:23,638 - govim - INFO - ======================================================================
+2026-01-24 18:34:57,177 - govim - ERROR - Fatal error: 'CommitDetector' object has no attribute 'generate_report'
+2026-01-24 18:34:57,177 - govim - ERROR - Fatal error: 'CommitDetector' object has no attribute 'generate_report'
+2026-01-24 18:37:22,042 - govim - INFO - 
+======================================================================
+2026-01-24 18:37:22,042 - govim - INFO - 
+======================================================================
+2026-01-24 18:37:22,042 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:37:22,042 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:37:22,043 - govim - INFO - ======================================================================
+2026-01-24 18:37:22,043 - govim - INFO - ======================================================================
+2026-01-24 18:38:45,882 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:38:45,882 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:38:45,885 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:38:45,885 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:44:06,501 - govim - INFO - 
+======================================================================
+2026-01-24 18:44:06,501 - govim - INFO - 
+======================================================================
+2026-01-24 18:44:06,501 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:44:06,501 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:44:06,502 - govim - INFO - ======================================================================
+2026-01-24 18:44:06,502 - govim - INFO - ======================================================================
+2026-01-24 18:44:52,220 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:44:52,220 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:44:52,222 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:44:52,222 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:47:34,778 - govim - INFO - 
+======================================================================
+2026-01-24 18:47:34,778 - govim - INFO - 
+======================================================================
+2026-01-24 18:47:34,780 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:47:34,780 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:47:34,780 - govim - INFO - ======================================================================
+2026-01-24 18:47:34,780 - govim - INFO - ======================================================================
+2026-01-24 18:47:34,822 - govim - ERROR - Setup failed
+2026-01-24 18:47:34,822 - govim - ERROR - Setup failed
+2026-01-24 18:47:40,557 - govim - INFO - 
+======================================================================
+2026-01-24 18:47:40,557 - govim - INFO - 
+======================================================================
+2026-01-24 18:47:40,558 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:47:40,558 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:47:40,558 - govim - INFO - ======================================================================
+2026-01-24 18:47:40,558 - govim - INFO - ======================================================================
+2026-01-24 18:47:49,135 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:47:49,135 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:47:49,137 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:47:49,137 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:50:03,168 - govim - INFO - 
+======================================================================
+2026-01-24 18:50:03,168 - govim - INFO - 
+======================================================================
+2026-01-24 18:50:03,169 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:50:03,169 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:50:03,169 - govim - INFO - ======================================================================
+2026-01-24 18:50:03,169 - govim - INFO - ======================================================================
+2026-01-24 18:50:12,073 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:50:12,073 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:50:12,073 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:50:12,073 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:53:14,268 - govim - INFO - 
+======================================================================
+2026-01-24 18:53:14,268 - govim - INFO - 
+======================================================================
+2026-01-24 18:53:14,270 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:53:14,270 - govim - INFO - GOVIM: GOVERNANCE SIMULATION FRAMEWORK
+2026-01-24 18:53:14,270 - govim - INFO - ======================================================================
+2026-01-24 18:53:14,270 - govim - INFO - ======================================================================
+2026-01-24 18:54:06,312 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:54:06,312 - govim - INFO - [OK] Detection completed successfully
+2026-01-24 18:54:06,313 - govim - INFO - 
+ Simulation completed successfully
+2026-01-24 18:54:06,313 - govim - INFO - 
+ Simulation completed successfully
