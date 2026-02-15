@@ -70,43 +70,63 @@ class RepositoryManager:
             return False
     
     def push(self, branch: str = "main", username: str = None, password: str = None) -> bool:
-        """Push to remote with agent credentials"""
+        """Push to remote with agent credentials using URL injection"""
         try:
             os.chdir(self.repo_path)
             
-            # Build push command with credentials if provided
+            # Default push command
+            push_cmd = ["git", "push", "origin", branch]
+            
+            # If credentials provided, inject them securely into the URL
             if username and password:
-                # Create temporary git credential helper
-                env = os.environ.copy()
-                env['GIT_ASKPASS'] = 'echo'
-                env['GIT_ASKPASS_RESULT'] = password
+                # 1. Get the current remote URL
+                remote_url_result = subprocess.run(
+                    ["git", "remote", "get-url", "origin"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
                 
-                result = subprocess.run(
-                    ["git", "push", "origin", branch],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    env=env
-                )
-            else:
-                result = subprocess.run(
-                    ["git", "push", "origin", branch],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
+                if remote_url_result.returncode == 0:
+                    base_url = remote_url_result.stdout.strip()
+                    
+                    # 2. Inject credentials: http://user:pass@host/repo.git
+                    if "://" in base_url:
+                        scheme, rest = base_url.split("://", 1)
+                        # Remove existing auth if present in the remote config
+                        if "@" in rest:
+                            rest = rest.split("@", 1)[1]
+                        
+                        # Construct URL with credentials
+                        authenticated_url = f"{scheme}://{username}:{password}@{rest}"
+                        
+                        # Use this specific URL for this specific push command
+                        push_cmd = ["git", "push", authenticated_url, branch]
+
+            # 3. Execute push
+            result = subprocess.run(
+                push_cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
             
             if result.returncode == 0:
-                logger.info(f"✓ Pushed to origin/{branch} by {self.current_user}")
+                user_label = username if username else self.current_user
+                logger.info(f"✓ Pushed to origin/{branch} by {user_label}")
                 return True
             else:
-                logger.warning(f"Push had issues: {result.stderr}")
+                # Mask password in logs if it failed
+                error_msg = result.stderr
+                if password:
+                    error_msg = error_msg.replace(password, "*****")
+                logger.warning(f"Push had issues: {error_msg}")
                 return False
+                
         except Exception as e:
             logger.error(f"Error pushing: {e}")
             return False
 
-    
     def configure(self, user_name: str, user_email: str) -> bool:
         """Configure git user"""
         try:

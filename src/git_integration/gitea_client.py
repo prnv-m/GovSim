@@ -111,3 +111,29 @@ class GiteaClient:
         except Exception as e:
             logger.error(f"Error creating PR: {e}")
             return None
+
+    def add_collaborator(self, repo_name: str, username: str, permission: str = "write") -> bool:
+            """Add a user as a collaborator with specific permissions"""
+            try:
+                url = f"{self.base_url}/api/v1/repos/{self.username}/{repo_name}/collaborators/{username}"
+                
+                # EXPLICITLY set permission to 'write' (or 'admin')
+                data = {"permission": permission}
+                
+                response = requests.put(
+                    url, 
+                    json=data,
+                    auth=(self.username, self.password),
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+                
+                if response.status_code == 204:
+                    logger.info(f"✓ Added {username} to {repo_name} with {permission} access")
+                    return True
+                else:
+                    logger.error(f"Failed to add collaborator {username}: {response.text}")
+                    return False
+            except Exception as e:
+                logger.error(f"Error adding collaborator: {e}")
+                return False
