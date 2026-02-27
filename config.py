@@ -33,8 +33,8 @@ class Config:
     GITEA_REPO_URL = f"{GITEA_URL}/{GITEA_MAIN_USER}/{GITEA_REPO_NAME}.git"
     
     # ===== AGENT CONFIGURATION =====
-    BENIGN_AGENT_COUNT = 2
-    MALICIOUS_AGENT_COUNT = 1
+    BENIGN_AGENT_COUNT = 4
+    MALICIOUS_AGENT_COUNT = 3
     MAX_ROUNDS = 25
     
     # ===== LOGGING =====
