@@ -45,7 +45,8 @@ class UserManager:
                 "email": email,
                 "password": password,
                 "full_name": username,
-                "login_name": username
+                "login_name": username,
+                "must_change_password": False
             }
             
             response = requests.post(
