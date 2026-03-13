@@ -1,5 +1,5 @@
 """
-Detect malicious commits in repository
+Detect malicious commits in repository - FIXED VERSION
 """
 
 import logging
@@ -80,7 +80,7 @@ class CommitDetector:
         return results
     
     def _get_commit_details(self, commit_hash: str) -> Dict:
-        """Get commit author and message"""
+        """Get commit author and message - FIXED VERSION"""
         try:
             if not isinstance(commit_hash, str):
                 commit_hash = str(commit_hash)
@@ -99,10 +99,10 @@ class CommitDetector:
             output = result.stdout.strip()
             if '|' in output:
                 parts = output.split('|', 1)  # Split on first | only
-                if len(parts) >= 2:  # ← Add this safety check
+                if len(parts) >= 2:  # Safety check
                     return {
-                        'author': parts.strip(),
-                        'message': parts.strip()
+                        'author': parts[0].strip(),  # FIX: parts[0] not just parts
+                        'message': parts[1].strip()  # FIX: parts[1] not just parts
                     }
             
             return {
@@ -112,7 +112,6 @@ class CommitDetector:
         except Exception as e:
             logger.warning(f"Error getting commit details for {commit_hash}: {e}")
             return {'author': 'Unknown', 'message': 'Unknown'}
-
     
     def _analyze_commit_code(self, commit_hash: str) -> Dict:
         """Analyze Python files in commit"""

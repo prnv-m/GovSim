@@ -26,13 +26,36 @@ class UserManager:
         except Exception as e:
             logger.error(f"Error checking user: {e}")
             return False
-    
+    def _force_password_reset_off(self, username: str):
+        """Helper: Explicitly tell Gitea to disable password change requirement"""
+        try:
+            url = f"{self.gitea_url}/api/v1/admin/users/{username}"
+            payload = {
+                "must_change_password": False,
+                "active": True,
+                "login_name": username
+            }
+            response = requests.patch(
+                url,
+                json=payload,
+                auth=(self.admin_user, self.admin_password),
+                timeout=10
+            )
+            if response.status_code == 200:
+                logger.info(f"  ✓ Fixed password policy for {username}")
+            else:
+                logger.warning(f"Could not fix password policy: {response.text}")
+        except Exception as e:
+            logger.error(f"Error forcing password policy: {e}")
     def create_user(self, username: str, email: str, password: str) -> bool:
         """Create a Gitea user account"""
         try:
-            # Check if already exists
+            # 1. If user exists, just ensure settings are correct and return
             if self.user_exists(username):
                 logger.info(f"User already exists: {username}")
+                # FORCE FIX even for existing users
+                self._force_password_reset_off(username) 
+                
                 self.created_users[username] = {
                     "username": username,
                     "email": email,
@@ -40,6 +63,7 @@ class UserManager:
                 }
                 return True
             
+            # 2. Create new user
             payload = {
                 "username": username,
                 "email": email,
@@ -58,6 +82,9 @@ class UserManager:
             
             if response.status_code in [200, 201]:
                 logger.info(f"✓ Created user: {username}")
+                # FORCE FIX (Double check)
+                self._force_password_reset_off(username)
+                
                 self.created_users[username] = {
                     "username": username,
                     "email": email,

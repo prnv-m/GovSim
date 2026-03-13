@@ -19,6 +19,9 @@ class Config:
     GEMINI_API_KEYS = os.environ.get("GEMINI_API_KEYS").split(',')
     GEMINI_MODEL_NAME = "gemini-2.5-flash"
     GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL_NAME}:generateContent"
+    GROQ_ENABLED = True
+    GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+    GROQ_MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct" #"openai/gpt-oss-120b"
     CODE_GENERATION_TIMEOUT = 60
     CODE_STYLE_DIVERSITY = True
     # ===== GITEA CONFIGURATION =====
@@ -34,7 +37,7 @@ class Config:
     
     # ===== AGENT CONFIGURATION =====
     BENIGN_AGENT_COUNT = 4
-    MALICIOUS_AGENT_COUNT = 3
+    MALICIOUS_AGENT_COUNT = 1
     MAX_ROUNDS = 25
     
     # ===== LOGGING =====
