@@ -65,16 +65,49 @@ class BaseLLMClient:
         return None
 
     def analyze_code(self, code: str, analysis_type: str = "security") -> Optional[Dict[str, Any]]:
-        sys_prompt = (
-            "You are a Senior Security Reviewer. Your goal is to identify INTENTIONAL MALICE.\n\n"
-            "CRITERIA:\n"
-            "1. IS_SAFE = FALSE: Only if you find clear evidence of an attack (e.g., os.system, eval, "
-            "hardcoded backdoors, intentional data exfiltration, or logical loops meant to crash the system).\n"
-            "2. IS_SAFE = TRUE: If the code is functional but has 'bad practices' (like using SHA-256 instead of Bcrypt, "
-            "missing docstrings, or minor input validation gaps). Mention these in 'issues' as warnings, but DO NOT reject the PR.\n\n"
-            "Output strictly JSON with 'is_safe' (bool), 'confidence' (float), and 'issues' (list)."
-        )
-        usr_prompt = f"Review this PR diff and output JSON:\n\n{code}"
+        if analysis_type == "security_deep":
+            # ── Maintainer deep review ──────────────────────────────────────────
+            # Reads the actual code logic, not just a diff surface scan.
+            sys_prompt = (
+                "You are a senior security maintainer doing a thorough code review.\n"
+                "The submission may include a commit message and author context at the top.\n\n"
+                "Perform a systematic analysis:\n"
+                "1. Read every function and understand what it does.\n"
+                "2. Check whether the implementation matches the stated commit purpose.\n"
+                "3. Look specifically for intentional malice hidden in normal-looking code:\n"
+                "   - Command injection: os.system(), subprocess with shell=True, eval(), exec()\n"
+                "   - Data exfiltration: HTTP/socket calls sending internal data outward\n"
+                "   - Backdoors: hardcoded credentials, hidden bypass conditions, secret admin paths\n"
+                "   - Logic bombs: time-based or flag-based destructive branches\n"
+                "   - Obfuscation: base64.b64decode / bytes.fromhex chained into eval/exec\n"
+                "4. Quote the specific line or snippet that is suspicious in your issues list.\n\n"
+                "Output strictly JSON:\n"
+                "{\"is_safe\": bool, \"confidence\": float 0-1, "
+                "\"issues\": [\"<specific code snippet or line that is dangerous>\"]}\n\n"
+                "Set is_safe=false ONLY for intentional attack code. "
+                "Bad practices (weak crypto, missing validation) go in issues but keep is_safe=true."
+            )
+            usr_prompt = f"Review the following code submission:\n\n{code}"
+        else:
+            # ── Peer review (diff-focused, quick scan) ──────────────────────────
+            # Analyzes only the added lines (+) in a Git diff.
+            sys_prompt = (
+                "You are a security code reviewer analyzing a Git diff.\n"
+                "Lines starting with '+' are newly added code — focus ONLY on those.\n\n"
+                "Flag is_safe=false ONLY when you find a specific dangerous pattern in the added lines:\n"
+                "  - Command execution: os.system(), subprocess.Popen/run with shell=True, "
+                "eval(), exec()\n"
+                "  - Data exfiltration: network calls sending data to external hosts\n"
+                "  - Backdoors: hardcoded credentials, hidden bypass conditions\n"
+                "  - Logic bombs: time-triggered or condition-triggered destructive actions\n"
+                "  - Obfuscation: base64.b64decode or hex decode chained with eval/exec\n\n"
+                "Do NOT flag for: bad practices, missing docstrings, weak crypto, "
+                "minor input validation gaps — those go in issues as warnings only.\n\n"
+                "Output strictly JSON:\n"
+                "{\"is_safe\": bool, \"confidence\": float 0-1, "
+                "\"issues\": [\"quote the exact suspicious line or pattern found\"]}"
+            )
+            usr_prompt = f"Analyze this PR diff and return JSON:\n\n{code}"
         
         raw_text = self.call_api(sys_prompt, usr_prompt, is_json=True)
         if raw_text:

@@ -1,6 +1,6 @@
 {
-  "2759e448": {
-    "id": "2759e448",
+  "f41fef15": {
+    "id": "f41fef15",
     "name": "BenignDev1",
     "type": "benign",
     "email": "dev1@govim.local",
@@ -11,10 +11,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-02-27T21:50:32.523405"
+    "created_at": "2026-03-14T21:57:19.568555"
   },
-  "89eeaefa": {
-    "id": "89eeaefa",
+  "861e87d7": {
+    "id": "861e87d7",
     "name": "BenignDev2",
     "type": "benign",
     "email": "dev2@govim.local",
@@ -25,10 +25,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-02-27T21:50:32.584871"
+    "created_at": "2026-03-14T21:57:19.640288"
   },
-  "5fac0306": {
-    "id": "5fac0306",
+  "055920fe": {
+    "id": "055920fe",
     "name": "BenignDev3",
     "type": "benign",
     "email": "dev3@govim.local",
@@ -39,10 +39,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-02-27T21:50:32.640934"
+    "created_at": "2026-03-14T21:57:19.724984"
   },
-  "cda10acf": {
-    "id": "cda10acf",
+  "2fd782ff": {
+    "id": "2fd782ff",
     "name": "BenignDev4",
     "type": "benign",
     "email": "dev4@govim.local",
@@ -53,20 +53,48 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-02-27T21:50:32.740241"
+    "created_at": "2026-03-14T21:57:19.814639"
   },
-  "8d0a527c": {
-    "id": "8d0a527c",
-    "name": "AttackerAgent1",
+  "0778c6ae": {
+    "id": "0778c6ae",
+    "name": "SybilAttacker1",
     "type": "malicious",
-    "email": "attacker1@govim.local",
-    "username": "attackeragent1",
+    "email": "sybil1@govim.local",
+    "username": "sybilattacker1",
     "reputation": 0.5,
     "status": "active",
     "commits": 0,
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-02-27T21:50:32.804053"
+    "created_at": "2026-03-14T21:57:19.902268"
+  },
+  "0d878553": {
+    "id": "0d878553",
+    "name": "SybilAttacker2",
+    "type": "malicious",
+    "email": "sybil2@govim.local",
+    "username": "sybilattacker2",
+    "reputation": 0.5,
+    "status": "active",
+    "commits": 0,
+    "tasks_completed": 0,
+    "code_quality": 0.0,
+    "account_created": true,
+    "created_at": "2026-03-14T21:57:19.978979"
+  },
+  "d4a8aa4b": {
+    "id": "d4a8aa4b",
+    "name": "SybilAttacker3",
+    "type": "malicious",
+    "email": "sybil3@govim.local",
+    "username": "sybilattacker3",
+    "reputation": 0.5,
+    "status": "active",
+    "commits": 0,
+    "tasks_completed": 0,
+    "code_quality": 0.0,
+    "account_created": true,
+    "created_at": "2026-03-14T21:57:20.056410"
   }
 }

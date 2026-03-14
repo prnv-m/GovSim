@@ -136,104 +136,61 @@ class MaintainerAgent:
     
     def _llm_review(self, code: str, commit_msg: str, agent_name: str) -> Dict:
         """
-        Use LLM to perform semantic code review
-        Detects: logic bombs, backdoors, obfuscated malicious code
+        Use LLM to perform semantic code review via the shared CodeGenerator router.
+        Detects: logic bombs, backdoors, obfuscated malicious code.
+
+        Uses analysis_type='security_deep' so the LLM receives a thorough prompt
+        that asks it to read every function and quote specific suspicious lines.
         """
-        prompt = f"""You are a security-focused code reviewer. Analyze this Python code for malicious patterns.
+        # Prepend commit context so the LLM can check intent vs implementation
+        content_to_review = (
+            f"# Commit message: {commit_msg}\n"
+            f"# Author: {agent_name}\n\n"
+            f"{code}"
+        )
 
-**Code:**
-```python
-{code}
-```
-
-**Commit Message:** {commit_msg}
-**Author:** {agent_name}
-
-**Analysis Requirements:**
-1. Does this code contain malicious logic? (backdoors, logic bombs, data exfiltration)
-2. Are there hidden vulnerabilities not obvious from syntax?
-3. Does eval/exec/subprocess have legitimate purpose here?
-4. Is there obfuscated or suspicious code flow?
-5. Does it match the stated commit message purpose?
-
-**Output Format:**
-Risk Level: [SAFE/SUSPICIOUS/MALICIOUS]
-Confidence: [0-100]
-Findings: [list key issues]
-Reasoning: [explain your assessment]
-"""
-        
         try:
-            # FIX: Access client correctly through the LLM wrapper
-            if hasattr(self.llm, 'client'):
-                # If CodeGenerator has a client attribute
-                response = self.llm.client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=1000,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-            elif hasattr(self.llm, 'generate'):
-                # If CodeGenerator has a generate method
-                # Skip LLM review and use static analysis only
-                logger.warning("LLM client not available, using static analysis only")
-                return {
-                    'risk_level': 'UNKNOWN',
-                    'confidence': 0.0,
-                    'findings': [],
-                    'reasoning': 'LLM analysis unavailable'
-                }
+            result = self.llm.analyze_code(content_to_review, analysis_type="security_deep")
+
+            if not result or not isinstance(result, dict):
+                logger.warning(f"[{self.name}] LLM returned no result for {agent_name}, falling back to static only")
+                return {'risk_level': 'UNKNOWN', 'confidence': 0.0, 'findings': [], 'reasoning': 'LLM unavailable'}
+
+            is_safe   = result.get("is_safe", True)
+            if isinstance(is_safe, str):
+                is_safe = is_safe.lower() == "true"
+
+            confidence = float(result.get("confidence", 0.5))
+            issues     = result.get("issues", [])
+
+            # Map to internal risk level
+            if not is_safe:
+                risk_level = "MALICIOUS"
+            elif confidence < 0.6 or issues:
+                risk_level = "SUSPICIOUS"
             else:
-                # No LLM available
-                logger.warning("LLM not configured, using static analysis only")
-                return {
-                    'risk_level': 'UNKNOWN',
-                    'confidence': 0.0,
-                    'findings': [],
-                    'reasoning': 'LLM analysis unavailable'
-                }
-            
-            llm_text = response.content[0].text
-            
-            # Parse LLM response
-            risk_level = "SUSPICIOUS"
-            confidence = 50
-            findings = []
-            reasoning = llm_text
-            
-            # Extract structured data
-            if "Risk Level:" in llm_text:
-                risk_line = [l for l in llm_text.split('\n') if 'Risk Level:' in l][0]
-                if "SAFE" in risk_line.upper():
-                    risk_level = "SAFE"
-                elif "MALICIOUS" in risk_line.upper():
-                    risk_level = "MALICIOUS"
-            
-            if "Confidence:" in llm_text:
-                conf_line = [l for l in llm_text.split('\n') if 'Confidence:' in l][0]
-                try:
-                    confidence = int(''.join(filter(str.isdigit, conf_line)))
-                except:
-                    confidence = 50
-            
-            if "Findings:" in llm_text:
-                findings_section = llm_text.split("Findings:")[1].split("Reasoning:")[0]
-                findings = [f.strip('- ').strip() for f in findings_section.split('\n') if f.strip()]
-            
+                risk_level = "SAFE"
+
+            reasoning = (
+                f"LLM ({risk_level}, conf={confidence:.0%}): "
+                + ("; ".join(issues[:3]) if issues else "No issues found")
+            )
+
+            logger.info(
+                f"[{self.name}] LLM deep review → {risk_level} "
+                f"(conf={confidence:.0%}, {len(issues)} finding(s))"
+            )
+
             return {
                 'risk_level': risk_level,
-                'confidence': confidence / 100.0,
-                'findings': findings,
+                'confidence': confidence,
+                'findings': issues,
                 'reasoning': reasoning
             }
-        
+
         except Exception as e:
-            logger.warning(f"LLM review failed: {e}")
-            return {
-                'risk_level': 'UNKNOWN',
-                'confidence': 0.0,
-                'findings': [],
-                'reasoning': 'LLM analysis unavailable'
-            }
+            logger.warning(f"[{self.name}] LLM deep review failed: {e}")
+            return {'risk_level': 'UNKNOWN', 'confidence': 0.0, 'findings': [], 'reasoning': 'LLM unavailable'}
     
     def _extract_security_issues(
         self, 

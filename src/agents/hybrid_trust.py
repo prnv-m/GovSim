@@ -47,17 +47,21 @@ class SimplifiedHybridTrust:
         code_content: str,
         commit_hash: str,
         commit_message: str,
-        filename: str = ""
+        filename: str = "",
+        sybil_voters: list = None   # Forwarded from SybilOrchestrator when active
     ) -> HybridTrustResult:
         """
         Gather reviews and ask Governance Engine for a decision.
+        sybil_voters (optional): list of SybilAgent instances that also cast
+        votes in the peer consensus phase — they may collude on group-member PRs.
         """
         # Step 1: Peer Review Phase
         peer_result = self.peer_consensus.get_peer_consensus(
             committer_agent=committer_agent,
             all_benign_agents=all_benign_agents,
             code_content=code_content,
-            commit_message=commit_message
+            commit_message=commit_message,
+            sybil_voters=sybil_voters
         )
         
         # Step 2: Maintainer Phase

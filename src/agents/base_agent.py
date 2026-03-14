@@ -227,19 +227,74 @@ class BenignAgent(BaseAgent):
 
 class MaliciousAgent(BaseAgent):
     """Attacker agent with phases"""
-    
+
     def __init__(self, name: str, email: str):
         super().__init__(name, AgentType.MALICIOUS, email)
         self.phase = AgentPhase.INFILTRATION
         self.attack_payload = None
         logger.info(f"✓ MaliciousAgent {name} initialized (Phase: {self.phase.value})")
-    
+
     def set_phase(self, phase: AgentPhase):
         """Update attack phase"""
         self.phase = phase
         logger.info(f"  Agent {self.name}: Phase changed to {phase.value}")
-    
+
     def set_payload(self, payload: str):
         """Set malicious payload"""
         self.attack_payload = payload
         logger.info(f"  Agent {self.name}: Payload set")
+
+
+class SybilAgent(MaliciousAgent):
+    """
+    Advanced Sybil attacker operating inside a coordinated ring.
+
+    Attack lifecycle:
+      1. TRUST_BUILDING_ROUNDS rounds: submits clean, benign code to build reputation.
+      2. After threshold: flips to EXPLOITATION — injects malicious code in own PRs
+         and auto-approves every group member's attack PR (collusion vote).
+
+    Group members share a group_id so they can recognise each other.
+    """
+
+    TRUST_BUILDING_ROUNDS = 3
+
+    def __init__(self, name: str, email: str, group_id: str):
+        super().__init__(name, email)
+        self.group_id = group_id          # Shared ring identifier
+        self.rounds_participated = 0      # Increments each time this agent submits a PR
+        self.in_attack_mode = False       # Flips after TRUST_BUILDING_ROUNDS
+        logger.info(
+            f"[SYBIL] {name} initialised — group='{group_id}', "
+            f"trust-building for {self.TRUST_BUILDING_ROUNDS} rounds before striking."
+        )
+
+    def record_round_participation(self):
+        """
+        Call after each round this agent submits a PR.
+        Flips the agent to EXPLOITATION mode once the trust-building
+        threshold is reached.
+        """
+        self.rounds_participated += 1
+        if self.rounds_participated >= self.TRUST_BUILDING_ROUNDS and not self.in_attack_mode:
+            self.in_attack_mode = True
+            self.set_phase(AgentPhase.EXPLOITATION)
+            logger.warning(
+                f"[SYBIL] *** {self.name} SWITCHING TO ATTACK MODE *** "
+                f"(rep={self.reputation:.2f} after {self.rounds_participated} clean rounds)"
+            )
+
+    def should_inject_malicious_code(self) -> bool:
+        """True only once the trust-building phase is complete."""
+        return self.in_attack_mode
+
+    def would_approve_sybil_peer(self, pr_author) -> bool:
+        """
+        Returns True when this agent should collude and blindly APPROVE
+        a group member's malicious PR.
+        Only activates when the PR author is also a SybilAgent in the same ring
+        who is currently in attack mode.
+        """
+        if not isinstance(pr_author, SybilAgent):
+            return False
+        return pr_author.group_id == self.group_id and pr_author.name != self.name

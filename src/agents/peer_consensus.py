@@ -48,31 +48,34 @@ class PeerConsensusEngine:
         logger.info(f"PeerConsensus initialized (Quorum: {self.quorum})")
 
     def get_peer_consensus(
-        self, 
-        committer_agent, 
-        all_benign_agents: list, 
-        code_content: str, 
-        commit_message: str
+        self,
+        committer_agent,
+        all_benign_agents: list,
+        code_content: str,
+        commit_message: str,
+        sybil_voters: list = None   # Optional Sybil ring members who also cast votes
     ) -> PeerConsensusResult:
         """
         Gather votes from all benign agents (excluding the author).
+        In Sybil mode, also accepts sybil_voters — colluding attackers who
+        auto-approve their group member's PRs while voting honestly on all others.
+
         code_content here is the Git Diff of the Pull Request.
         """
         # Filter out the author so they can't vote on their own PR
         reviewers = [a for a in all_benign_agents if a.name != committer_agent.name]
-        
-        reviews =[]
+
+        reviews = []
         approvals = 0
         rejections = 0
-        
-        logger.info(f"  Requesting reviews from {len(reviewers)} peers...")
-        
+
+        # ── Honest benign votes ───────────────────────────────────────────────
+        logger.info(f"  Requesting reviews from {len(reviewers)} benign peer(s)...")
+
         for reviewer in reviewers:
-            time.sleep(4) 
-            # 1. Agent Reviews Code (LLM Router -> Static Fallback)
+            time.sleep(4)
             is_safe, confidence, reason = self._analyze_diff(reviewer.name, code_content)
-            
-            # 2. Cast Vote
+
             review = PeerReview(
                 reviewer_name=reviewer.name,
                 is_safe=is_safe,
@@ -81,30 +84,57 @@ class PeerConsensusEngine:
                 reason=reason
             )
             reviews.append(review)
-            
+
             if is_safe:
                 approvals += 1
                 logger.info(f"    [{reviewer.name}] Voted: APPROVE (Conf: {confidence:.2f})")
             else:
                 rejections += 1
                 logger.info(f"    [{reviewer.name}] Voted: REJECT  (Reason: {reason})")
-                
-        # 3. Calculate Totals
+
+        # ── Sybil colluder votes (if Sybil mode is active) ───────────────────
+        if sybil_voters:
+            logger.info(f"  [SYBIL] {len(sybil_voters)} sybil voter(s) casting votes...")
+            for sybil in sybil_voters:
+                is_safe, confidence, reason = self._get_sybil_vote(
+                    sybil, committer_agent, code_content
+                )
+                review = PeerReview(
+                    reviewer_name=f"{sybil.name} [SYBIL]",
+                    is_safe=is_safe,
+                    trust_score=sybil.reputation,
+                    confidence=confidence,
+                    reason=reason
+                )
+                reviews.append(review)
+
+                if is_safe:
+                    approvals += 1
+                    logger.info(
+                        f"    [{sybil.name}] Sybil Vote: APPROVE "
+                        f"(Conf: {confidence:.2f}) | {reason}"
+                    )
+                else:
+                    rejections += 1
+                    logger.info(
+                        f"    [{sybil.name}] Sybil Vote: REJECT  (Reason: {reason})"
+                    )
+
+        # ── Tally ─────────────────────────────────────────────────────────────
         vote_count = len(reviews)
         if vote_count == 0:
             return self._empty_result()
-            
+
         avg_trust = sum(r.trust_score for r in reviews) / vote_count
         avg_confidence = sum(r.confidence for r in reviews) / vote_count
-        
-        # 4. Determine Raw Decision (Governance Engine will interpret this further)
+
         if vote_count < self.quorum:
             decision = Decision.PENDING
         elif approvals > rejections:
             decision = Decision.APPROVE
         else:
             decision = Decision.REJECT
-            
+
         return PeerConsensusResult(
             decision=decision,
             median_trust=avg_trust,
@@ -116,6 +146,33 @@ class PeerConsensusEngine:
             vote_count=vote_count,
             peer_reviews=reviews
         )
+
+    def _get_sybil_vote(
+        self, sybil_voter, committer_agent, diff_text: str
+    ) -> Tuple[bool, float, str]:
+        """
+        Determine a sybil agent's vote.
+
+        Collusion rule: if the PR author is a group member currently in attack
+        mode, the sybil voter auto-APPROVEs regardless of code content.
+        On all other PRs (honest devs or trust-building peers) they vote
+        normally to avoid raising suspicion.
+        """
+        from src.agents.base_agent import SybilAgent
+
+        if (
+            isinstance(committer_agent, SybilAgent)
+            and sybil_voter.would_approve_sybil_peer(committer_agent)
+            and committer_agent.in_attack_mode
+        ):
+            logger.warning(
+                f"[SYBIL COLLUSION] {sybil_voter.name} auto-APPROVING "
+                f"malicious PR by ring member {committer_agent.name}"
+            )
+            return True, 0.95, "COLLUDE: auto-approve by sybil ring member"
+
+        # Vote honestly — they don't want to appear suspicious
+        return self._analyze_diff(sybil_voter.name, diff_text)
 
     def _analyze_diff(self, reviewer_name: str, diff_text: str) -> Tuple[bool, float, str]:
         """
