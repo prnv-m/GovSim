@@ -20,6 +20,8 @@ from src.tasks.task_manager import DynamicTaskManager, create_assignment, print_
 # NEW IMPORTS
 from src.governance.enums import GovernanceModel
 from src.governance.engine import GovernanceEngine
+from src.results_collector import ResultsCollector
+from src.llm_client import get_and_reset_llm_stats
 
 logger = logging.getLogger("govim")
 
@@ -83,6 +85,11 @@ class PeerReviewOrchestrator:
         self.feature_assignment = None
         self.blocked_agents = set()
         self.flagged_agents = set()
+        self.results = None  # type: ResultsCollector | None
+        self._current_round = 0
+        self._pr_first_seen = {}  # pr_number -> round first evaluated
+        self._pr_last_votes = {}  # pr_number -> (approve_count, reject_count) from last evaluation
+        self._agent_round_index = 0  # round-robin cursor
         
         logger.info("="*70)
         logger.info("PR GOVERNANCE ORCHESTRATOR INITIALIZED")
@@ -100,8 +107,10 @@ class PeerReviewOrchestrator:
         logger.info("\n[1/5] Authenticating...")
         if not self.gitea_client.authenticate():
             return False
-        
-        logger.info("\n[2/5] Creating repository...")
+
+        logger.info("\n[2/5] Creating repository (resetting from previous run if needed)...")
+        self.gitea_client.delete_repository(Config.GITEA_REPO_NAME)
+        import time as _time; _time.sleep(1)  # brief pause for Gitea to process deletion
         repo = self.gitea_client.create_repository(
             Config.GITEA_REPO_NAME,
             "Governance simulation with PR workflow"
@@ -190,10 +199,19 @@ class PeerReviewOrchestrator:
         logger.info("SIMULATION: PR GOVERNANCE WORKFLOW")
         logger.info(f"Model: {self.governance_engine.model.name}")
         logger.info("="*70)
-        
+
+        self.results = ResultsCollector(
+            model=self.governance_engine.model.value,
+            rounds=rounds,
+            theme=getattr(self.current_task, 'name', 'unknown'),
+            sybil_mode=False,
+        )
+
         for round_num in range(1, rounds + 1):
             logger.info(f"\n--- ROUND {round_num}/{rounds} ---")
-            
+            self._current_round = round_num
+            self.results.start_round(round_num, self.registry.agents)
+
             # 1. PHASE A: AGENT ACTION (Code & PR)
             agent = self._select_agent()
             if agent:
@@ -201,22 +219,35 @@ class PeerReviewOrchestrator:
                 if feature:
                     self.submit_pr_for_feature(agent, feature)
                     feature['completed'] = True
-            
+
             # 2. PHASE B: GOVERNANCE (Review & Merge)
             self._process_open_pull_requests(auto_block)
-            
+
+            self.results.record_llm_stats(get_and_reset_llm_stats())
+            self.results.end_round()
             time.sleep(1)
-        
+
+        self.results.finalize(
+            self.registry.agents,
+            self.blocked_agents,
+            maintainer_reputations=self.maintainer.agent_reputation,
+        )
+        self.results.save()
         self._print_final_stats()
 
     def _select_agent(self):
-        """Helper to select a random non-blocked agent"""
-        available = [a for a in self.registry.agents.values() 
-                    if a.name not in self.blocked_agents]
-        if not available:
-            logger.warning("All agents blocked!")
+        """Round-robin agent selection, skipping blocked agents."""
+        all_agents = list(self.registry.agents.values())
+        if not all_agents:
             return None
-        return random.choice(available)
+        # Try each agent in order starting from the current cursor
+        for _ in range(len(all_agents)):
+            agent = all_agents[self._agent_round_index % len(all_agents)]
+            self._agent_round_index += 1
+            if agent.name not in self.blocked_agents:
+                return agent
+        logger.warning("All agents blocked!")
+        return None
 
     def submit_pr_for_feature(self, agent, feature):
         """
@@ -235,7 +266,7 @@ class PeerReviewOrchestrator:
         
         # 3. Generate Content
         filename = f"src/{feature['name']}_{agent.username}.py"
-        context = feature['description']
+        context = feature.get('description') or feature.get('desc', '')
         difficulty = self.current_task.difficulty
         
         if self._should_inject_code(agent):
@@ -252,7 +283,11 @@ class PeerReviewOrchestrator:
         )
         if not content:
             content = self._generate_template(agent, feature)
-            
+
+        # Sanitize benign agent output — replace LLM placeholder secrets
+        if not agent.is_malicious and content:
+            content = self._sanitize_benign_code(content)
+
         # 4. Commit locally
         self.repo_manager.create_file(filename, content)
         message = f"feat: {feature['name']}"
@@ -265,10 +300,12 @@ class PeerReviewOrchestrator:
             if self.repo_manager.push(branch_name, agent.username, agent.password):
                 
                 # 6. Create Pull Request via API
+                # Strip internal injection markers from the public PR body
+                public_context = context.split("\n[INJECT]")[0].strip()
                 pr = self.gitea_client.create_pull_request(
                     Config.GITEA_REPO_NAME,
                     title=f"Feature: {feature['name']}",
-                    body=f"Implemented by {agent.name}.\n\n{context}",
+                    body=f"Implemented by {agent.name}.\n\n{public_context}",
                     head=branch_name,
                     base="main"
                 )
@@ -308,13 +345,47 @@ class PeerReviewOrchestrator:
                     logger.warning(f"  Skipping PR #{pr_id}: Could not map branch '{head_ref}' to an agent.")
                     continue
 
+                # ── Stale PR expiry ───────────────────────────────────────────────
+                if pr_id not in self._pr_first_seen:
+                    self._pr_first_seen[pr_id] = self._current_round
+                rounds_pending = self._current_round - self._pr_first_seen[pr_id]
+                if rounds_pending >= Config.PR_MAX_PENDING_ROUNDS:
+                    logger.warning(
+                        f"  PR #{pr_id} by {committer_agent.name} has been PENDING "
+                        f"{rounds_pending} rounds — auto-closing as stale."
+                    )
+                    self.gitea_client.create_issue_comment(
+                        Config.GITEA_REPO_NAME, pr_id,
+                        "**[Governance Bot]** PR auto-closed: stale after "
+                        f"{rounds_pending} pending rounds (quorum never reached)."
+                    )
+                    self.gitea_client.close_pull_request(Config.GITEA_REPO_NAME, pr_id)
+                    self._pr_first_seen.pop(pr_id, None)
+                    # Apply reputation penalty based on last known peer votes
+                    last_approve, last_reject = self._pr_last_votes.pop(pr_id, (0, 0))
+                    if last_reject > last_approve:
+                        # Peers flagged it — treat like a rejection
+                        logger.info(f"  Stale-close penalty for {committer_agent.name} "
+                                    f"(peers rejected {last_reject}-{last_approve})")
+                        committer_agent.update_reputation(0.1)
+                    else:
+                        # Ambiguous — mild penalty for wasting review cycles
+                        committer_agent.update_reputation(0.45)
+                    if self.results:
+                        self.results.record_stale_pr(pr_id, committer_agent.name, rounds_pending)
+                    continue
+
                 logger.info(f"  Evaluating PR #{pr_id} by {committer_agent.name}...")
-                
+
                 # 1. Fetch Diff
                 diff_text = self.gitea_client.get_pull_request_diff(Config.GITEA_REPO_NAME, pr_id)
                 if not diff_text:
                     logger.warning(f"  Could not fetch diff for PR #{pr_id}")
                     continue
+                # Truncate oversized diffs to avoid hitting model context limits
+                if len(diff_text) > Config.PR_DIFF_MAX_CHARS:
+                    logger.warning(f"  PR #{pr_id} diff truncated ({len(diff_text)} -> {Config.PR_DIFF_MAX_CHARS} chars)")
+                    diff_text = diff_text[:Config.PR_DIFF_MAX_CHARS]
                 
                 # 2. Get Benign Agents (Reviewers)
                 reviewers = [a for a in self.registry.agents.values() if not a.is_malicious]
@@ -357,21 +428,42 @@ class PeerReviewOrchestrator:
                 
                 # 4. Act on Decision
                 if evaluation.final_decision in [FinalDecision.APPROVE]:
-                    
+
                     if self.gitea_client.merge_pull_request(Config.GITEA_REPO_NAME, pr_id):
                         logger.info(f"  -> MERGED PR #{pr_id}")
-                        committer_agent.update_reputation(0.9) 
-                    
+                        committer_agent.update_reputation(0.9)
+                        self._pr_first_seen.pop(pr_id, None)
+                        self._pr_last_votes.pop(pr_id, None)
+
                 elif evaluation.final_decision in[FinalDecision.REJECT, FinalDecision.BLOCK_AGENT]:
                     if self.gitea_client.close_pull_request(Config.GITEA_REPO_NAME, pr_id):
                         logger.info(f"  -> CLOSED PR #{pr_id} (Rejected)")
                         committer_agent.update_reputation(0.1)
-                    
+                        self._pr_first_seen.pop(pr_id, None)
+                        self._pr_last_votes.pop(pr_id, None)
+
                     if evaluation.should_block and auto_block:
                         self.blocked_agents.add(committer_agent.name)
-                
+
                 else:
                     logger.info(f"  -> PR #{pr_id} Pending ({evaluation.final_decision.value})")
+                    # Track latest peer votes so stale-close can penalise correctly
+                    self._pr_last_votes[pr_id] = (
+                        evaluation.peer_consensus.approval_count,
+                        evaluation.peer_consensus.rejection_count,
+                    )
+
+                if self.results:
+                    self.results.record_pr_decision(
+                        pr_number=pr_id,
+                        agent=committer_agent,
+                        decision=evaluation.final_decision.value,
+                        trust_score=evaluation.final_trust,
+                        approvals=evaluation.peer_consensus.approval_count,
+                        rejections=evaluation.peer_consensus.rejection_count,
+                        is_attack=False,
+                        peer_reviews=evaluation.peer_consensus.peer_reviews,
+                    )
     # ============= HELPERS =============
 
     def _should_inject_code(self, agent) -> bool:
@@ -381,6 +473,36 @@ class PeerReviewOrchestrator:
         (e.g. SybilOrchestrator suppresses injection during trust-building).
         """
         return agent.is_malicious
+
+    def _sanitize_benign_code(self, content: str) -> str:
+        """
+        Replace placeholder secrets in LLM-generated benign code with env-var
+        lookups so the static analyser does not penalise honest developers for
+        boilerplate the LLM outputs (e.g. SECRET_KEY = 'secret_key_here').
+        """
+        import re
+        # Match `KEY = 'x'` (bare) and `config['KEY'] = 'x'` (dict-style).
+        # Capture group 1 includes the optional closing quote/bracket + the = sign
+        # so they are preserved in the replacement.
+        # Case-sensitive (uppercase only) avoids false positives on lowercase vars
+        # like `password.join(...)` or `hashed_password = ...`.
+        # Require at least one character between quotes (['\"][^'\"]+['\"])
+        # so empty string separators like ''.join(...) are never matched.
+        patterns = [
+            (r"\bSECRET_KEY\b(['\"]?\]?\s*=\s*)['\"][^'\"]+['\"]",
+             r"SECRET_KEY\1os.environ.get('SECRET_KEY', '')"),
+            (r"\bPASSWORD\b(['\"]?\]?\s*=\s*)['\"][^'\"]+['\"]",
+             r"PASSWORD\1os.environ.get('PASSWORD', '')"),
+            (r"\bAPI_KEY\b(['\"]?\]?\s*=\s*)['\"][^'\"]+['\"]",
+             r"API_KEY\1os.environ.get('API_KEY', '')"),
+            (r"\bTOKEN\b(['\"]?\]?\s*=\s*)['\"][^'\"]+['\"]",
+             r"TOKEN\1os.environ.get('TOKEN', '')"),
+            (r"\bSECRET\b(['\"]?\]?\s*=\s*)['\"][^'\"]+['\"]",
+             r"SECRET\1os.environ.get('SECRET', '')"),
+        ]
+        for pat, repl in patterns:
+            content = re.sub(pat, repl, content)
+        return content
 
     def _generate_template(self, agent, feature: dict) -> str:
         """Generate template code with REAL vulnerabilities"""
@@ -401,16 +523,14 @@ def {func_name}(user_input):
         else:
             return f'''"""
 {feature['name']} - {agent.name}
-SECURE IMPLEMENTATION
 """
-import shlex
-import subprocess
 
-def {func_name}(user_input):
-    # SECURE: Argument sanitation
-    safe_input = shlex.quote(user_input)
-    subprocess.run(["echo", safe_input])
-    return "executed"
+def {func_name}(user_input: str) -> str:
+    """Process and validate input."""
+    if not isinstance(user_input, str):
+        raise TypeError("Expected string input")
+    sanitized = user_input.strip()
+    return sanitized
 '''
 
     def _print_evaluation_result(self, evaluation, agent):
@@ -460,7 +580,7 @@ class SybilOrchestrator(PeerReviewOrchestrator):
     OSS environment where multiple contributors are active simultaneously.
     """
 
-    SYBIL_AGENT_COUNT = 3
+    SYBIL_AGENT_COUNT = Config.SYBIL_AGENT_COUNT
     SYBIL_GROUP_ID    = "alpha-ring"
 
     def __init__(self, **kwargs):
@@ -525,13 +645,53 @@ def {func_name}(user_input: str) -> str:
 '''
         return super()._generate_template(agent, feature)
 
+    # ── Task setup override ───────────────────────────────────────────────────
+
+    def setup_task(self, theme: str = "random"):
+        """
+        Extends parent setup to guarantee each sybil agent has enough features
+        to complete trust-building AND submit at least one attack PR.
+        Without this, sybils exhaust their single feature during trust-building
+        and can never reach exploitation mode.
+        """
+        super().setup_task(theme)
+
+        if not self.current_task or not self.feature_assignment:
+            return
+
+        min_features = SybilAgent.TRUST_BUILDING_ROUNDS + 2  # trust rounds + 2 attack slots
+        sybil_agents = [a for a in self.registry.agents.values() if isinstance(a, SybilAgent)]
+        all_features  = self.current_task.features
+
+        for agent in sybil_agents:
+            current_count = len(self.feature_assignment.get_agent_features(agent.name))
+            needed = min_features - current_count
+            for i in range(needed):
+                base = all_features[i % len(all_features)]
+                extra = {
+                    'name': f"{base['name']}_v{current_count + i + 1}",
+                    'description': base['description'],
+                    'completed': False,
+                }
+                self.feature_assignment.assign_feature(agent.name, extra)
+
+        logger.info(
+            f"[SYBIL] Feature budgets topped up — each attacker now has "
+            f">={min_features} features ({SybilAgent.TRUST_BUILDING_ROUNDS} trust + 2 attack slots)"
+        )
+
     # ── PR submission ─────────────────────────────────────────────────────────
 
     def submit_pr_for_feature(self, agent, feature):
-        """Same as parent, but records round participation for sybil agents."""
-        super().submit_pr_for_feature(agent, feature)
+        """
+        Records round participation BEFORE code generation so the attack-mode
+        flag is set correctly when the parent generates and commits the code.
+        This ensures clean PRs are generated during trust-building and malicious
+        PRs are generated (and correctly labelled) after the threshold is crossed.
+        """
         if isinstance(agent, SybilAgent):
             agent.record_round_participation()
+        super().submit_pr_for_feature(agent, feature)
 
     # ── Round selection ───────────────────────────────────────────────────────
 
@@ -569,29 +729,46 @@ def {func_name}(user_input: str) -> str:
         )
         logger.info("=" * 70)
 
+        self.results = ResultsCollector(
+            model=self.governance_engine.model.value,
+            rounds=rounds,
+            theme=getattr(self.current_task, 'name', 'unknown'),
+            sybil_mode=True,
+        )
+
         for round_num in range(1, rounds + 1):
             logger.info(f"\n{'=' * 28} ROUND {round_num}/{rounds} {'=' * 28}")
+            self._current_round = round_num
+            self.results.start_round(round_num, self.registry.agents)
 
             agents_this_round = self._select_agents_for_round(agents_per_round)
             if not agents_this_round:
                 logger.warning("  No available agents this round.")
+                self.results.end_round()
                 continue
 
             logger.info(f"  Active agents: {[a.name for a in agents_this_round]}")
 
-            # PRs are submitted sequentially (Git FS requires it) but multiple
-            # can be open simultaneously — governance processes them all below.
             for agent in agents_this_round:
                 feature = self.feature_assignment.get_next_feature(agent.name)
                 if feature:
                     self.submit_pr_for_feature(agent, feature)
                     feature['completed'] = True
 
-            # Governance reviews every open PR (including those from prior rounds)
             self._process_open_pull_requests(auto_block)
 
+            self.results.record_llm_stats(get_and_reset_llm_stats())
+            self.results.end_round()
             time.sleep(1)
 
+        self.results.finalize(
+            self.registry.agents,
+            self.blocked_agents,
+            attacks_attempted=self.sybil_attacks_attempted,
+            attacks_succeeded=self.sybil_attacks_succeeded,
+            maintainer_reputations=self.maintainer.agent_reputation,
+        )
+        self.results.save()
         self._print_final_stats()
         self._print_sybil_report()
 
@@ -633,6 +810,33 @@ def {func_name}(user_input: str) -> str:
                 )
                 continue
 
+            # ── Stale PR expiry ───────────────────────────────────────────────
+            if pr_id not in self._pr_first_seen:
+                self._pr_first_seen[pr_id] = self._current_round
+            rounds_pending = self._current_round - self._pr_first_seen[pr_id]
+            if rounds_pending >= Config.PR_MAX_PENDING_ROUNDS:
+                logger.warning(
+                    f"  PR #{pr_id} by {committer_agent.name} has been PENDING "
+                    f"{rounds_pending} rounds — auto-closing as stale."
+                )
+                self.gitea_client.create_issue_comment(
+                    Config.GITEA_REPO_NAME, pr_id,
+                    "**[Governance Bot]** PR auto-closed: stale after "
+                    f"{rounds_pending} pending rounds (quorum never reached)."
+                )
+                self.gitea_client.close_pull_request(Config.GITEA_REPO_NAME, pr_id)
+                self._pr_first_seen.pop(pr_id, None)
+                last_approve, last_reject = self._pr_last_votes.pop(pr_id, (0, 0))
+                if last_reject > last_approve:
+                    logger.info(f"  Stale-close penalty for {committer_agent.name} "
+                                f"(peers rejected {last_reject}-{last_approve})")
+                    committer_agent.update_reputation(0.1)
+                else:
+                    committer_agent.update_reputation(0.45)
+                if self.results:
+                    self.results.record_stale_pr(pr_id, committer_agent.name, rounds_pending)
+                continue
+
             # ── Detect sybil attack PR ────────────────────────────────────────
             is_sybil_attack = (
                 isinstance(committer_agent, SybilAgent)
@@ -654,6 +858,10 @@ def {func_name}(user_input: str) -> str:
             if not diff_text:
                 logger.warning(f"  Could not fetch diff for PR #{pr_id}")
                 continue
+            # Truncate oversized diffs to avoid hitting model context limits
+            if len(diff_text) > Config.PR_DIFF_MAX_CHARS:
+                logger.warning(f"  PR #{pr_id} diff truncated ({len(diff_text)} -> {Config.PR_DIFF_MAX_CHARS} chars)")
+                diff_text = diff_text[:Config.PR_DIFF_MAX_CHARS]
 
             # ── Voter pools ───────────────────────────────────────────────────
             benign_reviewers = [
@@ -719,6 +927,8 @@ def {func_name}(user_input: str) -> str:
                 if self.gitea_client.merge_pull_request(Config.GITEA_REPO_NAME, pr_id):
                     logger.info(f"  -> MERGED PR #{pr_id}")
                     committer_agent.update_reputation(0.9)
+                    self._pr_first_seen.pop(pr_id, None)
+                    self._pr_last_votes.pop(pr_id, None)
                     if is_sybil_attack:
                         self.sybil_attacks_succeeded += 1
                         logger.warning(
@@ -730,6 +940,8 @@ def {func_name}(user_input: str) -> str:
                 if self.gitea_client.close_pull_request(Config.GITEA_REPO_NAME, pr_id):
                     logger.info(f"  -> CLOSED PR #{pr_id} (Rejected)")
                     committer_agent.update_reputation(0.1)
+                    self._pr_first_seen.pop(pr_id, None)
+                    self._pr_last_votes.pop(pr_id, None)
                     if is_sybil_attack:
                         logger.info(
                             f"  [SYBIL] Attack BLOCKED: Malicious PR #{pr_id} rejected."
@@ -741,6 +953,22 @@ def {func_name}(user_input: str) -> str:
             else:
                 logger.info(
                     f"  -> PR #{pr_id} Pending ({evaluation.final_decision.value})"
+                )
+                self._pr_last_votes[pr_id] = (
+                    evaluation.peer_consensus.approval_count,
+                    evaluation.peer_consensus.rejection_count,
+                )
+
+            if self.results:
+                self.results.record_pr_decision(
+                    pr_number=pr_id,
+                    agent=committer_agent,
+                    decision=evaluation.final_decision.value,
+                    trust_score=evaluation.final_trust,
+                    approvals=evaluation.peer_consensus.approval_count,
+                    rejections=evaluation.peer_consensus.rejection_count,
+                    is_attack=is_sybil_attack,
+                    peer_reviews=evaluation.peer_consensus.peer_reviews,
                 )
 
     # ── Sybil post-mortem report ──────────────────────────────────────────────

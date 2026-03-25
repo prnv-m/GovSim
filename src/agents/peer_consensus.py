@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from typing import List, Dict, Any, Tuple
 from src.governance.enums import Decision
-from src.llm_client import CodeGenerator
+from src.llm_client import CodeGenerator, _record
 import time
 logger = logging.getLogger("govim")
 
@@ -28,10 +28,12 @@ class PeerConsensusResult:
     confidence: float
     vote_distribution: dict
     participating_peers: int
-    approval_count: int
-    rejection_count: int
-    vote_count: int
+    approval_count: int           # raw vote count (for logging/records)
+    rejection_count: int          # raw vote count (for logging/records)
+    vote_count: int               # raw total (for quorum check)
     peer_reviews: List[PeerReview]
+    weighted_approval_score: float = 0.0   # reputation-weighted approval sum
+    weighted_rejection_score: float = 0.0  # reputation-weighted rejection sum
 
 class PeerConsensusEngine:
     def __init__(self, f: int = 1):
@@ -68,6 +70,8 @@ class PeerConsensusEngine:
         reviews = []
         approvals = 0
         rejections = 0
+        weighted_approvals = 0.0
+        weighted_rejections = 0.0
 
         # ── Honest benign votes ───────────────────────────────────────────────
         logger.info(f"  Requesting reviews from {len(reviewers)} benign peer(s)...")
@@ -75,6 +79,7 @@ class PeerConsensusEngine:
         for reviewer in reviewers:
             time.sleep(4)
             is_safe, confidence, reason = self._analyze_diff(reviewer.name, code_content)
+            weight = reviewer.reputation  # reputation-weighted vote
 
             review = PeerReview(
                 reviewer_name=reviewer.name,
@@ -85,11 +90,16 @@ class PeerConsensusEngine:
             )
             reviews.append(review)
 
-            if is_safe:
+            if confidence == 0.0:
+                # LLM unavailable — static fallback only; log as abstention, don't count
+                logger.info(f"    [{reviewer.name}] ABSTAIN (LLM unavailable, static scan inconclusive)")
+            elif is_safe:
                 approvals += 1
+                weighted_approvals += weight
                 logger.info(f"    [{reviewer.name}] Voted: APPROVE (Conf: {confidence:.2f})")
             else:
                 rejections += 1
+                weighted_rejections += weight
                 logger.info(f"    [{reviewer.name}] Voted: REJECT  (Reason: {reason})")
 
         # ── Sybil colluder votes (if Sybil mode is active) ───────────────────
@@ -99,6 +109,7 @@ class PeerConsensusEngine:
                 is_safe, confidence, reason = self._get_sybil_vote(
                     sybil, committer_agent, code_content
                 )
+                weight = sybil.reputation  # sybil votes also weighted by their reputation
                 review = PeerReview(
                     reviewer_name=f"{sybil.name} [SYBIL]",
                     is_safe=is_safe,
@@ -110,23 +121,26 @@ class PeerConsensusEngine:
 
                 if is_safe:
                     approvals += 1
+                    weighted_approvals += weight
                     logger.info(
                         f"    [{sybil.name}] Sybil Vote: APPROVE "
                         f"(Conf: {confidence:.2f}) | {reason}"
                     )
                 else:
                     rejections += 1
+                    weighted_rejections += weight
                     logger.info(
                         f"    [{sybil.name}] Sybil Vote: REJECT  (Reason: {reason})"
                     )
 
         # ── Tally ─────────────────────────────────────────────────────────────
-        vote_count = len(reviews)
-        if vote_count == 0:
+        # vote_count = raw LLM-backed votes (abstentions excluded) — used for quorum
+        vote_count = approvals + rejections
+        if len(reviews) == 0:
             return self._empty_result()
 
-        avg_trust = sum(r.trust_score for r in reviews) / vote_count
-        avg_confidence = sum(r.confidence for r in reviews) / vote_count
+        avg_trust = sum(r.trust_score for r in reviews) / len(reviews)
+        avg_confidence = sum(r.confidence for r in reviews) / len(reviews)
 
         if vote_count < self.quorum:
             decision = Decision.PENDING
@@ -144,7 +158,9 @@ class PeerConsensusEngine:
             approval_count=approvals,
             rejection_count=rejections,
             vote_count=vote_count,
-            peer_reviews=reviews
+            peer_reviews=reviews,
+            weighted_approval_score=weighted_approvals,
+            weighted_rejection_score=weighted_rejections,
         )
 
     def _get_sybil_vote(
@@ -183,32 +199,26 @@ class PeerConsensusEngine:
             return True, 0.5, "Empty diff"
 
         # Attempt LLM Analysis via Fallback Router
-        for provider in self.llm_router.providers:
-            try:
-                llm_result = self.llm_router.analyze_code(diff_text, analysis_type="security")
-                if llm_result and isinstance(llm_result, dict):
-                    # Safety cast just in case LLM outputs a string instead of boolean
-                    is_safe = llm_result.get("is_safe", True)
-                    if isinstance(is_safe, str):
-                        is_safe = str(is_safe).lower() == 'true'
-                        
-                    confidence = float(llm_result.get("confidence", 0.8))
-                    
-                    # Handle varying formats for 'issues'
-                    issues = llm_result.get("issues",[])
-                    if isinstance(issues, list) and len(issues) > 0:
-                        reason = str(issues[0])
-                    else:
-                        reason = "Looks safe"
-                        
-                    logger.debug(f"[{provider.name}] Review successful for {reviewer_name}")
-                    return is_safe, confidence, reason
-            except Exception as e:
-                logger.debug(f"[{provider.name}] review failed for {reviewer_name}: {e}. Trying next provider...")
-                continue # Try the next provider in the list
+        try:
+            llm_result = self.llm_router.analyze_code(diff_text, analysis_type="security")
+            if llm_result and isinstance(llm_result, dict):
+                is_safe = llm_result.get("is_safe", True)
+                if isinstance(is_safe, str):
+                    is_safe = is_safe.lower() == 'true'
+
+                confidence = float(llm_result.get("confidence", 0.8))
+
+                issues = llm_result.get("issues", [])
+                reason = str(issues[0]) if isinstance(issues, list) and issues else "Looks safe"
+
+                logger.debug(f"LLM review successful for {reviewer_name}")
+                return is_safe, confidence, reason
+        except Exception as e:
+            logger.debug(f"LLM review failed for {reviewer_name}: {e}")
 
         # Fallback: Static Keyword Analysis (If all LLMs fail or rate limit)
         logger.warning(f"All LLM providers failed for {reviewer_name}. Falling back to static analysis.")
+        _record("static_fallback")
         dangerous_keywords =["os.system", "subprocess", "eval(", "exec(", "pickle.loads"]
         
         # Only check added lines in the diff
@@ -219,7 +229,7 @@ class PeerConsensusEngine:
                 if keyword in line:
                     return False, 0.9, f"Detected dangerous keyword: {keyword}"
                     
-        return True, 0.7, "Passed static keyword scan"
+        return True, 0.0, "Passed static keyword scan (LLM unavailable)"
 
 
     def _empty_result(self):
@@ -227,7 +237,8 @@ class PeerConsensusEngine:
             decision=Decision.PENDING, median_trust=0.5, confidence=0.0,
             vote_distribution={"approve": 0, "reject": 0},
             participating_peers=0, approval_count=0, rejection_count=0,
-            vote_count=0, peer_reviews=[]
+            vote_count=0, peer_reviews=[],
+            weighted_approval_score=0.0, weighted_rejection_score=0.0,
         )
         
     def print_statistics(self):

@@ -46,7 +46,8 @@ class GiteaClient:
             if response.status_code in [200, 201]:
                 logger.info(f"✓ Created repository: {repo_name}")
                 return response.json()
-            elif response.status_code == 422: # Already exists
+            elif response.status_code in [409, 422] or "already exists" in response.text:
+                logger.info(f"Repository '{repo_name}' already exists — reusing.")
                 return self.get_repository(repo_name)
             else:
                 logger.error(f"Failed to create repo: {response.text}")
@@ -55,6 +56,23 @@ class GiteaClient:
             logger.error(f"Error creating repository: {e}")
             return None
     
+    def delete_repository(self, repo_name: str) -> bool:
+        """Delete a repository (used to reset state between simulation runs)."""
+        try:
+            response = requests.delete(
+                f"{self.base_url}/api/v1/repos/{self.username}/{repo_name}",
+                auth=(self.username, self.password),
+                timeout=10
+            )
+            if response.status_code in [204, 404]:
+                logger.info(f"✓ Deleted (or absent) repository: {repo_name}")
+                return True
+            logger.warning(f"Could not delete repo (HTTP {response.status_code}): {response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting repository: {e}")
+            return False
+
     def get_repository(self, repo_name: str) -> Optional[Dict]:
         try:
             response = requests.get(

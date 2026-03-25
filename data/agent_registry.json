@@ -1,6 +1,6 @@
 {
-  "f41fef15": {
-    "id": "f41fef15",
+  "0c6ed026": {
+    "id": "0c6ed026",
     "name": "BenignDev1",
     "type": "benign",
     "email": "dev1@govim.local",
@@ -11,10 +11,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-14T21:57:19.568555"
+    "created_at": "2026-03-26T00:04:05.132800"
   },
-  "861e87d7": {
-    "id": "861e87d7",
+  "a08b0660": {
+    "id": "a08b0660",
     "name": "BenignDev2",
     "type": "benign",
     "email": "dev2@govim.local",
@@ -25,10 +25,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-14T21:57:19.640288"
+    "created_at": "2026-03-26T00:04:05.193434"
   },
-  "055920fe": {
-    "id": "055920fe",
+  "5a5141ab": {
+    "id": "5a5141ab",
     "name": "BenignDev3",
     "type": "benign",
     "email": "dev3@govim.local",
@@ -39,24 +39,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-14T21:57:19.724984"
+    "created_at": "2026-03-26T00:04:05.242392"
   },
-  "2fd782ff": {
-    "id": "2fd782ff",
-    "name": "BenignDev4",
-    "type": "benign",
-    "email": "dev4@govim.local",
-    "username": "benigndev4",
-    "reputation": 0.5,
-    "status": "active",
-    "commits": 0,
-    "tasks_completed": 0,
-    "code_quality": 0.0,
-    "account_created": true,
-    "created_at": "2026-03-14T21:57:19.814639"
-  },
-  "0778c6ae": {
-    "id": "0778c6ae",
+  "483921ee": {
+    "id": "483921ee",
     "name": "SybilAttacker1",
     "type": "malicious",
     "email": "sybil1@govim.local",
@@ -67,10 +53,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-14T21:57:19.902268"
+    "created_at": "2026-03-26T00:04:05.304127"
   },
-  "0d878553": {
-    "id": "0d878553",
+  "a2381341": {
+    "id": "a2381341",
     "name": "SybilAttacker2",
     "type": "malicious",
     "email": "sybil2@govim.local",
@@ -81,20 +67,6 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-14T21:57:19.978979"
-  },
-  "d4a8aa4b": {
-    "id": "d4a8aa4b",
-    "name": "SybilAttacker3",
-    "type": "malicious",
-    "email": "sybil3@govim.local",
-    "username": "sybilattacker3",
-    "reputation": 0.5,
-    "status": "active",
-    "commits": 0,
-    "tasks_completed": 0,
-    "code_quality": 0.0,
-    "account_created": true,
-    "created_at": "2026-03-14T21:57:20.056410"
+    "created_at": "2026-03-26T00:04:05.352336"
   }
 }

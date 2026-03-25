@@ -23,8 +23,24 @@ class RepositoryManager:
         """
         try:
             if self.repo_path.exists() and force:
-                import shutil
-                shutil.rmtree(self.repo_path)
+                import shutil, stat, time as _time
+                def _force_remove(func, path, _):
+                    """Handle read-only files on Windows (git object files)."""
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+                for _ in range(3):
+                    try:
+                        shutil.rmtree(self.repo_path, onerror=_force_remove)
+                        break
+                    except OSError:
+                        _time.sleep(2)
+                else:
+                    # Last resort: Windows rmdir bypasses Python file-handle locks
+                    import subprocess as _sp
+                    _sp.run(
+                        ["cmd", "/c", "rmdir", "/s", "/q", str(self.repo_path)],
+                        capture_output=True, timeout=30,
+                    )
             
             # If agent username provided, modify URL to include credentials
             if agent_username:
@@ -165,7 +181,7 @@ class RepositoryManager:
         try:
             file_path = self.repo_path / filename
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content)
+            file_path.write_text(content, encoding='utf-8')
             logger.info(f"✓ Created file: {filename}")
             return True
         except Exception as e:

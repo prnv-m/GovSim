@@ -63,8 +63,8 @@ class BaseAgent:
             self.reputation = (self.reputation * (1 - alpha)) + (round_score * alpha)
         else:
             # NEGATIVE/NEUTRAL ACTION: Code was rejected or suspicious.
-            # Drop score more cautiously to allow benign devs to survive minor LLM mistakes.
-            penalty_alpha = 0.15
+            # Harsher drop — sybils caught attacking should lose trust quickly.
+            penalty_alpha = 0.35
             self.reputation = (self.reputation * (1 - penalty_alpha)) + (round_score * penalty_alpha)
             
         # Keep between 0 and 1
@@ -276,7 +276,7 @@ class SybilAgent(MaliciousAgent):
         threshold is reached.
         """
         self.rounds_participated += 1
-        if self.rounds_participated >= self.TRUST_BUILDING_ROUNDS and not self.in_attack_mode:
+        if self.rounds_participated > self.TRUST_BUILDING_ROUNDS and not self.in_attack_mode:
             self.in_attack_mode = True
             self.set_phase(AgentPhase.EXPLOITATION)
             logger.warning(

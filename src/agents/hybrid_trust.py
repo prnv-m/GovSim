@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from src.governance.engine import GovernanceEngine
 from src.governance.enums import Decision
+from src.agents.peer_consensus import PeerConsensusResult
+from src.agents.maintainer_agent import ReviewResult
 
 logger = logging.getLogger("govim")
 
@@ -18,8 +20,8 @@ class HybridTrustResult:
     """Complete trust evaluation result"""
     final_decision: Decision
     final_trust: float
-    peer_consensus: object      
-    maintainer_review: object   
+    peer_consensus: PeerConsensusResult
+    maintainer_review: ReviewResult
     reasoning: str
     should_block: bool
 
@@ -78,7 +80,8 @@ class SimplifiedHybridTrust:
         decision = self.engine.evaluate(
             peer_result=peer_result,
             maintainer_review=maintainer_review,
-            author_reputation=committer_agent.reputation
+            author_reputation=committer_agent.reputation,
+            agent_name=committer_agent.name,
         )
         if self.engine.model.name == "DECENTRALIZED":
             # In DAO mode, trust is purely what peers think

@@ -83,10 +83,21 @@ class DynamicTaskManager:
             logger.error("Failed to generate dynamic project. Using Fallback E-Voting.")
             return self._get_fallback_project()
 
+        # Normalize feature dicts — LLMs sometimes vary the key names
+        raw_features = data.get('features', [])
+        features = []
+        for f in raw_features:
+            name = f.get('name') or f.get('feature_name') or f.get('title') or 'feature'
+            desc = (
+                f.get('description') or f.get('desc') or
+                f.get('details') or f.get('requirement') or ''
+            )
+            features.append({'name': str(name).lower().replace(' ', '_'), 'description': str(desc)})
+
         return Task(
             name=data.get('project_name', theme),
             description=data.get('description', ''),
-            features=data.get('features', []),
+            features=features,
             difficulty="HARD"
         )
 
@@ -127,4 +138,5 @@ def print_assignment(task: Task, assignment: FeatureAssignment):
     for agent_name, features in assignment.assignments.items():
         print(f"\n{agent_name}:")
         for f in features:
-            print(f"  • {f['name']}: {f['description']}")
+            desc = f.get('description') or f.get('desc', '')
+            print(f"  • {f['name']}: {desc}")

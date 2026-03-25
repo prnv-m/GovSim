@@ -39,6 +39,7 @@ class ReviewResult:
     issues: List[SecurityIssue]
     reasoning: str
     recommendations: List[str]
+    llm_available: bool = True  # False when LLM was rate-limited or unavailable
 
 
 class MaintainerAgent:
@@ -131,7 +132,8 @@ class MaintainerAgent:
             quality_score=quality_score,
             issues=issues,
             reasoning=reasoning,
-            recommendations=recommendations
+            recommendations=recommendations,
+            llm_available=(llm_result.get('risk_level') != 'UNKNOWN'),
         )
     
     def _llm_review(self, code: str, commit_msg: str, agent_name: str) -> Dict:
