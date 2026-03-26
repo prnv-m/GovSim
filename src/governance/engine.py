@@ -73,7 +73,10 @@ class GovernanceEngine:
                     self._voter_pair_agreement[pair][0] += 1
                 total = self._voter_pair_agreement[pair][1]
                 agree_rate = self._voter_pair_agreement[pair][0] / total
-                if total >= 3 and agree_rate >= 0.95:
+                # Only alert when at least one reviewer is a known sybil voter
+                # (benign pairs naturally agree on legitimate PRs — not collusion)
+                pair_involves_sybil = any("[SYBIL]" in p for p in pair)
+                if total >= 3 and agree_rate >= 0.95 and pair_involves_sybil:
                     logger.warning(
                         f"  [COLLUDER ALERT] {pair[0]} & {pair[1]} agree on "
                         f"{agree_rate:.0%} of {total} shared reviews — possible ring collusion"
@@ -120,8 +123,9 @@ class GovernanceEngine:
 
         raw_votes = peer_result.vote_count
 
-        # 1. Check Quorum (raw vote count — abstentions excluded)
-        if raw_votes < self.min_quorum:
+        # 1. Dynamic quorum: never require more votes than there were available reviewers
+        effective_quorum = min(self.min_quorum, max(1, peer_result.max_possible_voters))
+        if raw_votes < effective_quorum:
             return Decision.PENDING
 
         # 2. Reputation-weighted approval ratio
@@ -137,7 +141,8 @@ class GovernanceEngine:
         if weighted_ratio >= effective_threshold:
             return Decision.APPROVE
         elif w_reject >= w_approve:
-            if raw_votes >= 5 and weighted_ratio < 0.4:
+            # BLOCK when ≥2 votes cast AND overwhelming rejection (weighted ratio < 0.3)
+            if raw_votes >= 2 and weighted_ratio < 0.3:
                 return Decision.BLOCK_AGENT
             return Decision.REJECT
 

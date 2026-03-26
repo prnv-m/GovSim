@@ -23,7 +23,9 @@ class Config:
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
     GROQ_MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"   # large: code gen + deep review
     GROQ_SMALL_MODEL_NAME = "moonshotai/kimi-k2-instruct"             # small: task gen + peer review (60 RPM, 10K TPM)
-    CODE_GENERATION_TIMEOUT = 60
+    CODE_GENERATION_TIMEOUT = 60   # code gen — large output, allow longer
+    ANALYSIS_TIMEOUT = 15          # peer review / security analysis — small JSON, fail fast
+    PEER_REVIEW_DELAY = 2          # seconds between peer review calls (rate-limit guard)
     CODE_STYLE_DIVERSITY = True
     # ===== GITEA CONFIGURATION =====
     GITEA_URL = os.getenv("GITEA_URL", "http://localhost:3001")

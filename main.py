@@ -25,6 +25,7 @@ if sys.platform == 'win32':
 
 from src.utils.logger import setup_logging
 from src.orchestrator import PeerReviewOrchestrator, SybilOrchestrator
+from config import Config
 
 # Setup logging
 logger = setup_logging("govim")
@@ -83,7 +84,7 @@ def main():
 
             if args.sybil:
                 logger.info("Mode: SYBIL ATTACK — Advanced Red Team Demonstration")
-                logger.info(f"3 coordinated attackers | max 3 PRs/round | 7 rounds | model={model}")
+                logger.info(f"{Config.SYBIL_AGENT_COUNT} coordinated attacker(s) | max 3 PRs/round | {rounds} rounds | model={model}")
 
                 orchestrator = SybilOrchestrator(
                     byzantine_tolerance=1,

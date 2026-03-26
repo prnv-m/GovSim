@@ -201,9 +201,28 @@ def run_label(run):
     mode_tag = "[SYBIL]" if meta.get("sybil_mode") else "[NORMAL]"
     return f"{meta['model'].upper()}  {mode_tag}  —  {ts}"
 
+
+def augment_normal_run(run):
+    """Back-fill attack stats for normal runs saved before is_attack was set correctly."""
+    s = run.get("summary", {})
+    if not run["meta"].get("sybil_mode") and s.get("attacks_attempted", 0) == 0:
+        malicious = [p for p in run.get("pr_log", []) if p.get("is_malicious")]
+        if malicious:
+            attempted = len(malicious)
+            succeeded = sum(1 for p in malicious if p["decision"] == "approve")
+            blocked = attempted - succeeded
+            s["attacks_attempted"] = attempted
+            s["attacks_succeeded"] = succeeded
+            s["attacks_blocked"] = blocked
+            s["false_positives"] = sum(1 for p in run.get("pr_log", []) if p.get("was_false_positive"))
+            s["detection_rate"] = round(blocked / attempted, 4) if attempted > 0 else None
+            s["sybil_defeated"] = succeeded == 0
+    return run
+
+
 # ── Load data ─────────────────────────────────────────────────────────────────
 
-all_runs = load_all_runs()
+all_runs = [augment_normal_run(r) for r in load_all_runs()]
 
 if not all_runs:
     st.markdown("""
@@ -337,21 +356,39 @@ with tab_overview:
             stat3_label = "False Pos"
             stat3_color = "#ffa657"
         else:
-            merged = s.get("total_merged", 0)
-            merge_rate = round(merged / total_prs * 100) if total_prs > 0 else 0
-            big_num = f"{merge_rate}%"
-            sub_label = "Merge Rate"
-            badge_cls = "badge-safe" if merge_rate > 0 else "badge-warn"
-            badge_txt = "NORMAL RUN"
-            stat1_val = total_prs
-            stat1_label = "Total PRs"
-            stat1_color = "#58a6ff"
-            stat2_val = merged
-            stat2_label = "Merged"
-            stat2_color = "#3fb950"
-            stat3_val = s.get("total_rejected", 0)
-            stat3_label = "Rejected"
-            stat3_color = "#f85149"
+            atk = s.get("attacks_attempted", 0)
+            if atk > 0:
+                dr = s.get("detection_rate")
+                big_num = f"{dr*100:.0f}%" if dr is not None else "N/A"
+                sub_label = "Detection Rate"
+                succeeded = s.get("attacks_succeeded", 0)
+                badge_cls = "badge-safe" if succeeded == 0 else "badge-danger"
+                badge_txt = "ATTACK BLOCKED" if succeeded == 0 else "ATTACK MERGED"
+                stat1_val = s.get("attacks_blocked", 0)
+                stat1_label = "Blocked"
+                stat1_color = "#3fb950"
+                stat2_val = succeeded
+                stat2_label = "Succeeded"
+                stat2_color = "#f85149"
+                stat3_val = s.get("false_positives", 0)
+                stat3_label = "False Pos"
+                stat3_color = "#ffa657"
+            else:
+                merged = s.get("total_merged", 0)
+                merge_rate = round(merged / total_prs * 100) if total_prs > 0 else 0
+                big_num = f"{merge_rate}%"
+                sub_label = "Merge Rate"
+                badge_cls = "badge-safe"
+                badge_txt = "NORMAL RUN"
+                stat1_val = total_prs
+                stat1_label = "Total PRs"
+                stat1_color = "#58a6ff"
+                stat2_val = merged
+                stat2_label = "Merged"
+                stat2_color = "#3fb950"
+                stat3_val = s.get("total_rejected", 0)
+                stat3_label = "Rejected"
+                stat3_color = "#f85149"
 
         with col:
             st.markdown(f"""

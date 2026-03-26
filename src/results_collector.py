@@ -156,6 +156,13 @@ class ResultsCollector:
         maintainer_reputations: dict = None,
     ):
         """Build per-agent summary and overall stats after the simulation ends."""
+        # For normal mode runs, derive attack stats from pr_log if not passed explicitly
+        if attacks_attempted == 0:
+            malicious_prs = [p for p in self.pr_log if p.get("is_malicious")]
+            if malicious_prs:
+                attacks_attempted = len(malicious_prs)
+                attacks_succeeded = sum(1 for p in malicious_prs if p["decision"] == "approve")
+
         attacks_blocked = attacks_attempted - attacks_succeeded
         false_positives = sum(1 for p in self.pr_log if p["was_false_positive"])
         false_negatives = sum(1 for p in self.pr_log if p["was_false_negative"])

@@ -265,7 +265,7 @@ class PeerReviewOrchestrator:
         self.repo_manager.checkout(branch_name, create=True)
         
         # 3. Generate Content
-        filename = f"src/{feature['name']}_{agent.username}.py"
+        filename = f"src/{feature['name']}_{agent.id}.py"
         context = feature.get('description') or feature.get('desc', '')
         difficulty = self.current_task.difficulty
         
@@ -461,7 +461,7 @@ class PeerReviewOrchestrator:
                         trust_score=evaluation.final_trust,
                         approvals=evaluation.peer_consensus.approval_count,
                         rejections=evaluation.peer_consensus.rejection_count,
-                        is_attack=False,
+                        is_attack=committer_agent.is_malicious,
                         peer_reviews=evaluation.peer_consensus.peer_reviews,
                     )
     # ============= HELPERS =============

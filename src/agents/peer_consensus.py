@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Tuple
 from src.governance.enums import Decision
 from src.llm_client import CodeGenerator, _record
+from config import Config
 import time
 logger = logging.getLogger("govim")
 
@@ -34,6 +35,7 @@ class PeerConsensusResult:
     peer_reviews: List[PeerReview]
     weighted_approval_score: float = 0.0   # reputation-weighted approval sum
     weighted_rejection_score: float = 0.0  # reputation-weighted rejection sum
+    max_possible_voters: int = 0           # total reviewers invited (for dynamic quorum)
 
 class PeerConsensusEngine:
     def __init__(self, f: int = 1):
@@ -55,7 +57,7 @@ class PeerConsensusEngine:
         all_benign_agents: list,
         code_content: str,
         commit_message: str,
-        sybil_voters: list = None   # Optional Sybil ring members who also cast votes
+        sybil_voters=None
     ) -> PeerConsensusResult:
         """
         Gather votes from all benign agents (excluding the author).
@@ -66,6 +68,7 @@ class PeerConsensusEngine:
         """
         # Filter out the author so they can't vote on their own PR
         reviewers = [a for a in all_benign_agents if a.name != committer_agent.name]
+        max_possible = len(reviewers) + len(sybil_voters or [])
 
         reviews = []
         approvals = 0
@@ -77,7 +80,7 @@ class PeerConsensusEngine:
         logger.info(f"  Requesting reviews from {len(reviewers)} benign peer(s)...")
 
         for reviewer in reviewers:
-            time.sleep(4)
+            time.sleep(Config.PEER_REVIEW_DELAY)
             is_safe, confidence, reason = self._analyze_diff(reviewer.name, code_content)
             weight = reviewer.reputation  # reputation-weighted vote
 
@@ -161,6 +164,7 @@ class PeerConsensusEngine:
             peer_reviews=reviews,
             weighted_approval_score=weighted_approvals,
             weighted_rejection_score=weighted_rejections,
+            max_possible_voters=max_possible,
         )
 
     def _get_sybil_vote(

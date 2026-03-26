@@ -110,15 +110,24 @@ class BaseLLMClient:
             # ── Peer review (diff-focused, quick scan) ──────────────────────────
             # Analyzes only the added lines (+) in a Git diff.
             sys_prompt = (
-                "You are a security code reviewer analyzing a Git diff.\n"
+                "You are a security code reviewer analyzing a Git diff for a supply-chain attack.\n"
                 "Lines starting with '+' are newly added code — focus ONLY on those.\n\n"
-                "Flag is_safe=false ONLY when you find a specific dangerous pattern in the added lines:\n"
+                "Flag is_safe=false when you find ANY of these patterns in the added lines:\n"
                 "  - Command execution: os.system(), subprocess.Popen/run with shell=True, "
                 "eval(), exec()\n"
-                "  - Data exfiltration: network calls sending data to external hosts\n"
-                "  - Backdoors: hardcoded credentials, hidden bypass conditions\n"
-                "  - Logic bombs: time-triggered or condition-triggered destructive actions\n"
-                "  - Obfuscation: base64.b64decode or hex decode chained with eval/exec\n\n"
+                "  - Data exfiltration: socket/http/requests calls sending internal data outward\n"
+                "  - Backdoors: hardcoded credentials, hidden bypass conditions, secret admin paths\n"
+                "  - Logic bombs: time.time() comparisons, datetime checks, or flag-based branches "
+                "that trigger destructive or exfiltration actions\n"
+                "  - Obfuscation: base64.b64decode or bytes.fromhex chained with eval/exec\n"
+                "  - Timing side-channels: loops or operations whose duration intentionally leaks "
+                "secret state (e.g. early-exit string comparison, sleep proportional to secret length)\n"
+                "  - Covert storage: writing secrets/keys to files, env vars, or global state "
+                "not clearly related to the stated commit purpose\n"
+                "  - Mismatched intent: code that does something unrelated to what the commit "
+                "message describes (e.g. commit says 'fix typo' but adds a network call)\n\n"
+                "Be SUSPICIOUS: attackers hide malice in helper functions and innocuous-looking "
+                "branches. If the added code has no clear relation to the commit message, flag it.\n\n"
                 "Do NOT flag for: bad practices, missing docstrings, weak crypto, "
                 "minor input validation gaps — those go in issues as warnings only.\n\n"
                 "Output strictly JSON:\n"
@@ -160,17 +169,20 @@ class GeminiClient(BaseLLMClient):
             
         headers = {'Content-Type': 'application/json', 'X-goog-api-key': self.api_key}
         
+        timeout = Config.ANALYSIS_TIMEOUT if is_json else Config.CODE_GENERATION_TIMEOUT
         try:
-            response = requests.post(self.api_url, headers=headers, json=payload, timeout=Config.CODE_GENERATION_TIMEOUT)
+            response = requests.post(self.api_url, headers=headers, json=payload, timeout=timeout)
             if response.status_code == 200:
                 _record("gemini_success")
                 return response.json()['candidates'][0]['content']['parts'][0]['text']
             elif response.status_code == 429:
                 logger.warning(f"[{self.name}] Rate limit exceeded (429).")
+            elif response.status_code == 503:
+                logger.warning(f"[{self.name}] Service unavailable (503) — falling back.")
             else:
                 logger.error(f"[{self.name}] API Error {response.status_code}: {response.text}")
         except Exception as e:
-            logger.error(f"[{self.name}] Exception: {e}")
+            logger.warning(f"[{self.name}] Timeout/exception ({type(e).__name__}) — falling back to next provider.")
         _record("gemini_fail")
         return None
 
