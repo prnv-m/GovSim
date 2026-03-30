@@ -1,6 +1,6 @@
 {
-  "ea141112": {
-    "id": "ea141112",
+  "761bf390": {
+    "id": "761bf390",
     "name": "BenignDev1",
     "type": "benign",
     "email": "dev1@govim.local",
@@ -11,10 +11,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-26T15:44:09.910431"
+    "created_at": "2026-03-29T18:53:04.906524"
   },
-  "bb50419a": {
-    "id": "bb50419a",
+  "feceb7b9": {
+    "id": "feceb7b9",
     "name": "BenignDev2",
     "type": "benign",
     "email": "dev2@govim.local",
@@ -25,10 +25,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-26T15:44:09.975109"
+    "created_at": "2026-03-29T18:53:05.037844"
   },
-  "4906c828": {
-    "id": "4906c828",
+  "84ba52ff": {
+    "id": "84ba52ff",
     "name": "BenignDev3",
     "type": "benign",
     "email": "dev3@govim.local",
@@ -39,10 +39,10 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-26T15:44:10.029079"
+    "created_at": "2026-03-29T18:53:05.141960"
   },
-  "0c4c5d06": {
-    "id": "0c4c5d06",
+  "d9ca0383": {
+    "id": "d9ca0383",
     "name": "AttackerAgent1",
     "type": "malicious",
     "email": "attacker1@govim.local",
@@ -53,6 +53,6 @@
     "tasks_completed": 0,
     "code_quality": 0.0,
     "account_created": true,
-    "created_at": "2026-03-26T15:44:10.085957"
+    "created_at": "2026-03-29T18:53:05.267015"
   }
 }

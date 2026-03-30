@@ -154,6 +154,16 @@ hr { border-color: #30363d !important; }
     background: linear-gradient(90deg, transparent, #30363d, transparent);
     margin: 24px 0;
 }
+
+/* ── Bento bordered containers (st.container border=True) ── */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background: #161b22 !important;
+    border-color: #30363d !important;
+    border-radius: 14px !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] > div {
+    padding: 4px 8px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -185,6 +195,7 @@ def hex_to_rgba(hex_color: str, alpha: float = 0.08) -> str:
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=30)
 def load_all_runs():
     runs = []
     for path in sorted(RESULTS_DIR.glob("run_*.json")):
@@ -203,20 +214,35 @@ def run_label(run):
 
 
 def augment_normal_run(run):
-    """Back-fill attack stats for normal runs saved before is_attack was set correctly."""
+    """Back-fill attack stats for normal runs saved before attack fields were set correctly."""
     s = run.get("summary", {})
     if not run["meta"].get("sybil_mode") and s.get("attacks_attempted", 0) == 0:
-        malicious = [p for p in run.get("pr_log", []) if p.get("is_malicious")]
-        if malicious:
-            attempted = len(malicious)
-            succeeded = sum(1 for p in malicious if p["decision"] == "approve")
-            blocked = attempted - succeeded
+        pr_log = run.get("pr_log", [])
+        # Only count PRs where the agent was actively attacking (in_attack_mode),
+        # not reputation-building PRs from malicious agents.
+        attacks = [p for p in pr_log if p.get("in_attack_mode")]
+        if not attacks:
+            # Fallback: use is_malicious if in_attack_mode is never set
+            attacks = [p for p in pr_log if p.get("is_malicious")]
+        if attacks:
+            attempted = len(attacks)
+            succeeded = sum(1 for p in attacks if str(p.get("decision", "")).lower() == "approve")
+            blocked   = attempted - succeeded
             s["attacks_attempted"] = attempted
             s["attacks_succeeded"] = succeeded
-            s["attacks_blocked"] = blocked
-            s["false_positives"] = sum(1 for p in run.get("pr_log", []) if p.get("was_false_positive"))
-            s["detection_rate"] = round(blocked / attempted, 4) if attempted > 0 else None
-            s["sybil_defeated"] = succeeded == 0
+            s["attacks_blocked"]   = blocked
+            s["false_positives"]   = sum(
+                1 for p in pr_log
+                if p.get("agent_type", "").lower() == "benign"
+                and str(p.get("decision", "")).lower() in ("reject", "block_agent")
+            )
+            s["false_negatives"]   = sum(
+                1 for p in pr_log
+                if p.get("in_attack_mode")
+                and str(p.get("decision", "")).lower() == "approve"
+            )
+            s["detection_rate"]    = round(blocked / attempted, 4) if attempted > 0 else None
+            s["sybil_defeated"]    = succeeded == 0
     return run
 
 
@@ -255,6 +281,10 @@ with st.sidebar:
         <div style='font-size:0.7rem; color:#8b949e; letter-spacing:1px;'>GOVERNANCE SIMULATION</div>
     </div>
     """, unsafe_allow_html=True)
+
+    if st.button("⟳ Reload Data", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
     st.markdown('<div class="section-header">Filter by Mode</div>', unsafe_allow_html=True)
     sybil_filter = st.radio(
@@ -329,90 +359,152 @@ tab_overview, tab_security, tab_reputation, tab_prs, tab_analysis, tab_compare =
 
 with tab_overview:
 
-    # ── Hero cards ──
-    cols = st.columns(len(selected_runs))
-    for col, run in zip(cols, selected_runs):
-        s = run.get("summary", {})
-        m = run["meta"]
-        model = m["model"].lower()
-        is_sybil = m.get("sybil_mode", False)
-        color = model_color(model)
-        total_prs = s.get("total_prs", 0)
+    # ── Bento: one aggregate card per governance model (always all runs) ──────
+    from collections import defaultdict as _dd
+    _mgroups = _dd(list)
+    for _r in all_runs:          # aggregates are always global — sidebar filter only affects mini-cards
+        _mgroups[_r["meta"]["model"].lower()].append(_r)
 
-        if is_sybil:
-            dr = s.get("detection_rate")
-            big_num = f"{dr*100:.0f}%" if dr is not None else "N/A"
-            sub_label = "Detection Rate"
-            defeated = s.get("sybil_defeated", False)
-            badge_cls = "badge-safe" if defeated else "badge-danger"
-            badge_txt = "RING DEFEATED" if defeated else "RING SUCCEEDED"
-            stat1_val = s.get("attacks_blocked", 0)
-            stat1_label = "Blocked"
-            stat1_color = "#3fb950"
-            stat2_val = s.get("attacks_succeeded", 0)
-            stat2_label = "Succeeded"
-            stat2_color = "#f85149"
-            stat3_val = s.get("false_positives", 0)
-            stat3_label = "False Pos"
-            stat3_color = "#ffa657"
-        else:
-            atk = s.get("attacks_attempted", 0)
-            if atk > 0:
-                dr = s.get("detection_rate")
-                big_num = f"{dr*100:.0f}%" if dr is not None else "N/A"
-                sub_label = "Detection Rate"
-                succeeded = s.get("attacks_succeeded", 0)
-                badge_cls = "badge-safe" if succeeded == 0 else "badge-danger"
-                badge_txt = "ATTACK BLOCKED" if succeeded == 0 else "ATTACK MERGED"
-                stat1_val = s.get("attacks_blocked", 0)
-                stat1_label = "Blocked"
-                stat1_color = "#3fb950"
-                stat2_val = succeeded
-                stat2_label = "Succeeded"
-                stat2_color = "#f85149"
-                stat3_val = s.get("false_positives", 0)
-                stat3_label = "False Pos"
-                stat3_color = "#ffa657"
+    _bento_cards = []
+    for _mdl in ["centralized", "decentralized", "hybrid"]:
+        _mruns = _mgroups.get(_mdl)
+        if not _mruns:
+            continue
+        _color    = model_color(_mdl)
+        _sybil_r  = [r for r in _mruns if r["meta"].get("sybil_mode")]
+        _normal_r = [r for r in _mruns if not r["meta"].get("sybil_mode")]
+
+        # Avg detection rate across sybil runs only
+        _drs     = [r.get("summary", {}).get("detection_rate") for r in _sybil_r]
+        _drs     = [d for d in _drs if d is not None]
+        _avg_dr  = sum(_drs) / len(_drs) if _drs else None
+        _dr_str  = f"{_avg_dr*100:.0f}%" if _avg_dr is not None else "—"
+
+        _tot_atk  = sum(r.get("summary", {}).get("attacks_attempted", 0) for r in _sybil_r)
+        _tot_blk  = sum(r.get("summary", {}).get("attacks_blocked",  0) for r in _sybil_r)
+        _tot_succ = sum(r.get("summary", {}).get("attacks_succeeded", 0) for r in _sybil_r)
+        _defeated = sum(1 for r in _sybil_r if r.get("summary", {}).get("sybil_defeated"))
+
+        if _sybil_r:
+            if _defeated == len(_sybil_r):
+                _sc, _st = "#3fb950", "ALL RINGS DEFEATED"
+            elif _defeated > 0:
+                _sc, _st = "#d29922", f"{_defeated}/{len(_sybil_r)} RINGS DEFEATED"
             else:
-                merged = s.get("total_merged", 0)
-                merge_rate = round(merged / total_prs * 100) if total_prs > 0 else 0
-                big_num = f"{merge_rate}%"
-                sub_label = "Merge Rate"
-                badge_cls = "badge-safe"
-                badge_txt = "NORMAL RUN"
-                stat1_val = total_prs
-                stat1_label = "Total PRs"
-                stat1_color = "#58a6ff"
-                stat2_val = merged
-                stat2_label = "Merged"
-                stat2_color = "#3fb950"
-                stat3_val = s.get("total_rejected", 0)
-                stat3_label = "Rejected"
-                stat3_color = "#f85149"
+                _sc, _st = "#f85149", "RING SUCCEEDED"
+        else:
+            _sc, _st = "#8b949e", "NORMAL ONLY"
 
-        with col:
-            st.markdown(f"""
-            <div class="hero-card">
-                <div class="model-name" style="color:{color};">{model.upper()}</div>
-                <div class="big-number" style="color:{color};">{big_num}</div>
-                <div class="sub-label">{sub_label}</div>
-                <div style="display:flex; justify-content:space-between; margin-top:16px; gap:8px;">
-                    <div style="flex:1; background:#21262d; border-radius:8px; padding:10px;">
-                        <div style="font-size:1.4rem; font-weight:700; color:{stat1_color};">{stat1_val}</div>
-                        <div style="font-size:0.7rem; color:#8b949e;">{stat1_label}</div>
+        _sbg = hex_to_rgba(_sc, 0.12)
+        _cbg = hex_to_rgba(_color, 0.06)
+
+        _bento_cards.append(f"""
+        <div style="background:linear-gradient(145deg,#161b22,#1c2128);
+                    border:1px solid #30363d;border-radius:16px;overflow:hidden;">
+            <div style="height:3px;background:{_color};"></div>
+            <div style="padding:20px 22px;">
+                <div style="display:flex;justify-content:space-between;
+                            align-items:flex-start;margin-bottom:16px;">
+                    <div>
+                        <div style="font-size:0.58rem;font-weight:700;color:#8b949e;
+                                    letter-spacing:2.5px;text-transform:uppercase;
+                                    margin-bottom:6px;">{_mdl}</div>
+                        <div style="font-size:2.6rem;font-weight:800;color:{_color};
+                                    line-height:1;letter-spacing:-1px;">{_dr_str}</div>
+                        <div style="font-size:0.6rem;color:#8b949e;text-transform:uppercase;
+                                    letter-spacing:0.8px;margin-top:4px;">Avg Detection Rate</div>
                     </div>
-                    <div style="flex:1; background:#21262d; border-radius:8px; padding:10px;">
-                        <div style="font-size:1.4rem; font-weight:700; color:{stat2_color};">{stat2_val}</div>
-                        <div style="font-size:0.7rem; color:#8b949e;">{stat2_label}</div>
-                    </div>
-                    <div style="flex:1; background:#21262d; border-radius:8px; padding:10px;">
-                        <div style="font-size:1.4rem; font-weight:700; color:{stat3_color};">{stat3_val}</div>
-                        <div style="font-size:0.7rem; color:#8b949e;">{stat3_label}</div>
+                    <div style="text-align:right;">
+                        <span style="font-size:0.6rem;font-weight:700;color:{_sc};
+                                     background:{_sbg};padding:3px 10px;border-radius:20px;
+                                     border:1px solid {_sc};white-space:nowrap;">{_st}</span>
+                        <div style="font-size:0.68rem;color:#8b949e;margin-top:10px;line-height:1.6;">
+                            {len(_mruns)} runs&nbsp;·&nbsp;{len(_sybil_r)}S&nbsp;/&nbsp;{len(_normal_r)}N
+                        </div>
                     </div>
                 </div>
-                <span class="badge {badge_cls}">{badge_txt}</span>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                    <div style="background:#21262d;border-radius:8px;padding:10px 12px;">
+                        <div style="font-size:1.25rem;font-weight:700;color:#58a6ff;">{_tot_atk}</div>
+                        <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                                    letter-spacing:0.5px;margin-top:2px;">Attacks</div>
+                    </div>
+                    <div style="background:#21262d;border-radius:8px;padding:10px 12px;">
+                        <div style="font-size:1.25rem;font-weight:700;color:#3fb950;">{_tot_blk}</div>
+                        <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                                    letter-spacing:0.5px;margin-top:2px;">Blocked</div>
+                    </div>
+                    <div style="background:#21262d;border-radius:8px;padding:10px 12px;">
+                        <div style="font-size:1.25rem;font-weight:700;color:#f85149;">{_tot_succ}</div>
+                        <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                                    letter-spacing:0.5px;margin-top:2px;">Bypassed</div>
+                    </div>
+                </div>
             </div>
-            """, unsafe_allow_html=True)
+        </div>""")
+
+    _gc = f"repeat({len(_bento_cards)}, 1fr)"
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:{_gc};gap:16px;margin-bottom:20px;">'
+        + "".join(_bento_cards) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Individual run mini-cards (CSS auto-fill grid, wraps at any run count) ──
+    st.markdown('<div class="section-header">Individual Runs</div>', unsafe_allow_html=True)
+
+    _mini_cards = []
+    for _run in selected_runs:
+        _s     = _run.get("summary", {})
+        _m     = _run["meta"]
+        _mdl   = _m["model"].lower()
+        _color = model_color(_mdl)
+        _is_s  = _m.get("sybil_mode", False)
+        _ml    = "SYBIL" if _is_s else "NORMAL"
+        _mc    = "#f85149" if _is_s else "#3fb950"
+        _mcbg  = hex_to_rgba(_mc, 0.1)
+
+        _atk = _s.get("attacks_attempted", 0)
+        if _is_s or _atk > 0:
+            _dr  = _s.get("detection_rate")
+            _mv  = f"{_dr*100:.0f}%" if _dr is not None else "N/A"
+            _mlb = "Detection"
+            _def = _s.get("sybil_defeated")
+            _vc  = "#3fb950" if _def else "#f85149"
+            _vt  = "✓ Ring defeated" if _def else "✗ Ring bypassed"
+        else:
+            _tp  = _s.get("total_prs", 1) or 1
+            _mg  = _s.get("total_merged", 0)
+            _mv  = f"{_mg / _tp * 100:.0f}%"
+            _mlb = "Merge Rate"
+            _vc  = "#8b949e"
+            _vt  = "— Normal run"
+
+        _ts = _m.get("timestamp", "")[:10]
+        _mini_cards.append(f"""
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;
+                    padding:12px 14px;border-top:2px solid {_color};">
+            <div style="display:flex;justify-content:space-between;
+                        align-items:center;margin-bottom:8px;">
+                <span style="font-size:0.58rem;font-weight:700;color:{_color};
+                             text-transform:uppercase;letter-spacing:1.5px;">{_mdl}</span>
+                <span style="font-size:0.52rem;font-weight:600;color:{_mc};
+                             background:{_mcbg};padding:2px 7px;border-radius:10px;
+                             border:1px solid {_mc};">{_ml}</span>
+            </div>
+            <div style="font-size:1.55rem;font-weight:800;color:{_color};
+                        line-height:1;letter-spacing:-0.5px;">{_mv}</div>
+            <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                        letter-spacing:0.5px;margin:3px 0 8px;">{_mlb}</div>
+            <div style="font-size:0.68rem;color:{_vc};font-weight:600;">{_vt}</div>
+            <div style="font-size:0.58rem;color:#484f58;margin-top:4px;">{_ts}</div>
+        </div>""")
+
+    st.markdown(
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));'
+        'gap:10px;margin-bottom:24px;">' + "".join(_mini_cards) + "</div>",
+        unsafe_allow_html=True,
+    )
 
     st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
 
@@ -428,15 +520,15 @@ with tab_overview:
         for run in selected_runs:
             s = run.get("summary", {})
             model = run["meta"]["model"].lower()
-            total_prs = max(s.get("total_prs", 1), 1)
-            atk = max(s.get("attacks_attempted", 1), 1)
-            benign_prs = total_prs - atk
+            total_prs  = max(s.get("total_prs", 1), 1)
+            atk_raw    = s.get("attacks_attempted", 0)
+            benign_prs = max(total_prs - atk_raw, 1)
 
-            dr = s.get("detection_rate") or 0
-            fp_rate = 1 - (s.get("false_positives", 0) / max(benign_prs, 1))
-            fn_rate = 1 - (s.get("false_negatives", 0) / atk)
+            dr         = s.get("detection_rate") or 0
+            fp_rate    = 1 - (s.get("false_positives", 0) / benign_prs)
+            fn_rate    = 1 - (s.get("false_negatives", 0) / max(atk_raw, 1))
             merge_rate = s.get("total_merged", 0) / total_prs
-            efficiency = s.get("total_merged", 0) / max(benign_prs, 1)
+            efficiency = s.get("total_merged", 0) / benign_prs
 
             values = [dr, fp_rate, fn_rate, merge_rate, min(efficiency, 1)]
             values += [values[0]]  # close loop
@@ -532,34 +624,46 @@ with tab_overview:
 
 with tab_security:
 
-    # Warn if all selected runs are normal (no attack data to show)
-    all_normal = all(not r["meta"].get("sybil_mode") for r in selected_runs)
-    if all_normal:
-        st.info(
-            "All selected runs are **Normal** (no sybil attack). "
-            "Attack metrics (detection rate, blocked, false positives) are not applicable. "
-            "Switch to **Sybil Only** in the sidebar to see security stats."
-        )
+    # ── Helper: count FP/FN from pr_log (source of truth) ────────────────────
+    def _count_errors_from_log(run):
+        """Count FP (benign PR rejected) and FN (active attack PR approved) from pr_log."""
+        fp = fn = 0
+        for p in run.get("pr_log", []):
+            atype    = p.get("agent_type", "").lower()
+            is_benign  = atype == "benign"
+            in_attack  = bool(p.get("in_attack_mode"))   # actively submitting malicious code
+            decision   = p.get("decision", "").lower()
+            rejected   = decision in ("reject", "block_agent")
+            approved   = decision == "approve"
+            if is_benign and rejected:
+                fp += 1
+            if in_attack and approved:
+                fn += 1
+        return fp, fn
 
-    # ── Detection rate gauges ──
+    # ── Detection rate gauges — one per governance model, avg across selected runs ──
     st.markdown('<div class="section-header">Detection Rate Gauges</div>', unsafe_allow_html=True)
 
-    gauge_cols = st.columns(len(selected_runs))
-    for col, run in zip(gauge_cols, selected_runs):
-        s = run.get("summary", {})
-        model = run["meta"]["model"]
-        dr = (s.get("detection_rate") or 0) * 100
-        color = model_color(model)
+    _gauge_cols = st.columns(3)
+    for col, _mdl in zip(_gauge_cols, ["centralized", "decentralized", "hybrid"]):
+        _mdl_runs = [r for r in selected_runs if r["meta"]["model"].lower() == _mdl]
+        _drs = [r.get("summary", {}).get("detection_rate") for r in _mdl_runs
+                if r.get("summary", {}).get("detection_rate") is not None]
+        _avg_dr = (sum(_drs) / len(_drs) * 100) if _drs else 0
+        _n_runs = len(_mdl_runs)
+        _color = model_color(_mdl)
 
         fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number+delta",
-            value=dr,
-            delta={"reference": 50, "valueformat": ".0f", "suffix": "%"},
-            number={"suffix": "%", "font": {"size": 36, "color": color}},
-            title={"text": model.upper(), "font": {"size": 14, "color": "#8b949e"}},
+            mode="gauge+number",
+            value=_avg_dr,
+            number={"suffix": "%", "font": {"size": 48, "color": _color},
+                    "valueformat": ".1f"},
+            title={"text": f"{_mdl.upper()}<br><span style='font-size:0.75em;color:#8b949e;'>{_n_runs} run(s) · avg detection</span>",
+                   "font": {"size": 13, "color": "#8b949e"}},
             gauge={
-                "axis": {"range": [0, 100], "tickcolor": "#8b949e", "tickfont": {"color": "#8b949e"}},
-                "bar": {"color": color, "thickness": 0.25},
+                "axis": {"range": [0, 100], "tickcolor": "#8b949e",
+                         "tickfont": {"color": "#8b949e", "size": 11}},
+                "bar": {"color": _color, "thickness": 0.3},
                 "bgcolor": "#21262d",
                 "borderwidth": 0,
                 "steps": [
@@ -567,24 +671,23 @@ with tab_security:
                     {"range": [40, 70], "color": "rgba(210,153,34,0.15)"},
                     {"range": [70, 100], "color": "rgba(63,185,80,0.15)"},
                 ],
-                "threshold": {"line": {"color": color, "width": 3}, "thickness": 0.8, "value": dr},
+                "threshold": {"line": {"color": _color, "width": 3},
+                              "thickness": 0.8, "value": _avg_dr},
             },
         ))
         fig_gauge.update_layout(
             **PLOTLY_DARK,
-            margin=dict(l=20, r=20, t=60, b=20),
-            height=260,
+            margin=dict(l=30, r=30, t=60, b=60),
+            height=300,
         )
         with col:
             st.plotly_chart(fig_gauge, use_container_width=True)
 
-    st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
-
+    # ── Attack outcomes & classification errors ──
     col_atk, col_err = st.columns(2)
 
     with col_atk:
         st.markdown('<div class="section-header">Attack Outcomes</div>', unsafe_allow_html=True)
-
         sec_rows = []
         for run in selected_runs:
             s = run.get("summary", {})
@@ -594,8 +697,8 @@ with tab_security:
                 {"Model": model, "Metric": "Blocked",   "Count": s.get("attacks_blocked", 0)},
                 {"Model": model, "Metric": "Succeeded", "Count": s.get("attacks_succeeded", 0)},
             ]
-
         df_sec = pd.DataFrame(sec_rows)
+        df_sec = df_sec.groupby(["Model", "Metric"], as_index=False)["Count"].sum()
         fig_atk = px.bar(
             df_sec, x="Model", y="Count", color="Metric", barmode="group",
             color_discrete_map={"Attempted": "#58a6ff", "Blocked": "#3fb950", "Succeeded": "#f85149"},
@@ -613,20 +716,23 @@ with tab_security:
 
     with col_err:
         st.markdown('<div class="section-header">Classification Errors</div>', unsafe_allow_html=True)
-
+        st.caption("FP = benign PR rejected · FN = attack PR approved")
         err_rows = []
         for run in selected_runs:
-            s = run.get("summary", {})
             model = run["meta"]["model"].upper()
+            fp, fn = _count_errors_from_log(run)
             err_rows += [
-                {"Model": model, "Type": "False Positives", "Count": s.get("false_positives", 0)},
-                {"Model": model, "Type": "False Negatives", "Count": s.get("false_negatives", 0)},
+                {"Model": model, "Type": "False Positives (benign rejected)", "Count": fp},
+                {"Model": model, "Type": "False Negatives (attack approved)", "Count": fn},
             ]
-
         df_err = pd.DataFrame(err_rows)
+        df_err = df_err.groupby(["Model", "Type"], as_index=False)["Count"].sum()
         fig_err = px.bar(
             df_err, x="Model", y="Count", color="Type", barmode="group",
-            color_discrete_map={"False Positives": "#ffa657", "False Negatives": "#f85149"},
+            color_discrete_map={
+                "False Positives (benign rejected)": "#ffa657",
+                "False Negatives (attack approved)": "#f85149",
+            },
         )
         fig_err.update_layout(
             **PLOTLY_DARK,
@@ -656,6 +762,7 @@ with tab_security:
 
     if round_rows:
         df_rounds = pd.DataFrame(round_rows)
+        df_rounds = df_rounds.groupby(["Model", "Round"], as_index=False).sum()
         fig_tl = px.line(
             df_rounds, x="Round", y="Attacks Attempted", color="Model",
             color_discrete_map={m.upper(): c for m, c in MODEL_COLORS.items()},
@@ -671,14 +778,12 @@ with tab_security:
             yaxis=dict(gridcolor="#30363d"),
             legend=dict(font_color="#c9d1d9", bgcolor="rgba(0,0,0,0)"),
         )
-        # Add shaded area under each line
-        for run in selected_runs:
-            model = run["meta"]["model"].upper()
-            sub = df_rounds[df_rounds["Model"] == model]
+        for _mdl_key in df_rounds["Model"].unique():
+            sub = df_rounds[df_rounds["Model"] == _mdl_key]
             fig_tl.add_trace(go.Scatter(
                 x=sub["Round"], y=sub["Attacks Attempted"],
                 fill="tozeroy",
-                fillcolor=hex_to_rgba(model_color(run["meta"]["model"]), 0.08),
+                fillcolor=hex_to_rgba(model_color(_mdl_key.lower()), 0.08),
                 line=dict(width=0),
                 showlegend=False,
                 hoverinfo="skip",
@@ -692,172 +797,140 @@ with tab_security:
 
 with tab_reputation:
 
-    run_choice = st.selectbox(
-        "Select run to inspect",
-        options=[run_label(r) for r in selected_runs],
-        key="rep_run",
-        label_visibility="collapsed",
-    )
-    run = next(r for r in selected_runs if run_label(r) == run_choice)
-    model_name = run["meta"]["model"].upper()
+    # Group selected runs by governance model, then aggregate reputation per agent/round
+    from collections import defaultdict as _ddict
+    _rep_model_groups = _ddict(list)
+    for _r in selected_runs:
+        _rep_model_groups[_r["meta"]["model"].lower()].append(_r)
 
-    # Build a UUID→name map to handle old run files that stored agent UUIDs as keys
-    _name_set = {a["name"] for a in run.get("agents", [])}
-    _uuid_to_name = {}
-    first_round_keys = set(run["rounds"][0].get("agent_reputations", {}).keys()) if run.get("rounds") else set()
-    if first_round_keys and not first_round_keys.issubset(_name_set):
-        # Old format: keys are UUIDs — map by position (order is stable within a run)
-        agent_names_ordered = [a["name"] for a in run.get("agents", [])]
-        for i, uid in enumerate(sorted(first_round_keys)):
-            if i < len(agent_names_ordered):
-                _uuid_to_name[uid] = agent_names_ordered[i]
+    benign_blues = ["#58a6ff", "#79c0ff", "#388bfd", "#1f6feb", "#0d419d"]
+    sybil_reds   = ["#f85149", "#ff7b72", "#ffa198", "#ff4040", "#cc2222"]
 
-    rep_rows = []
-    for rd in run.get("rounds", []):
-        for agent_key, rep in rd.get("agent_reputations", {}).items():
-            agent_name = _uuid_to_name.get(agent_key, agent_key)
-            rep_rows.append({"Round": rd["round"], "Agent": agent_name, "Reputation": rep})
+    for _mdl_name, _mdl_runs in _rep_model_groups.items():
+        st.markdown(
+            f'<div class="section-header">{_mdl_name.upper()} — {len(_mdl_runs)} run(s) selected</div>',
+            unsafe_allow_html=True,
+        )
 
-    if rep_rows:
-        df_rep = pd.DataFrame(rep_rows)
-        agent_types = {a["name"]: a["type"] for a in run.get("agents", [])}
-        df_rep["Type"] = df_rep["Agent"].map(lambda n: agent_types.get(n, "unknown"))
+        # Collect rep rows from all runs in this model group
+        _all_rep_rows = []
+        _agent_types = {}
+        _all_final = {}  # agent -> [rep values]
+        for _run in _mdl_runs:
+            _name_set = {a["name"] for a in _run.get("agents", [])}
+            _uuid_map = {}
+            _frk = set(_run["rounds"][0].get("agent_reputations", {}).keys()) if _run.get("rounds") else set()
+            if _frk and not _frk.issubset(_name_set):
+                _ord = [a["name"] for a in _run.get("agents", [])]
+                for _i, _uid in enumerate(sorted(_frk)):
+                    if _i < len(_ord):
+                        _uuid_map[_uid] = _ord[_i]
+            for _rd in _run.get("rounds", []):
+                for _ak, _rv in _rd.get("agent_reputations", {}).items():
+                    _an = _uuid_map.get(_ak, _ak)
+                    _all_rep_rows.append({"Round": _rd["round"], "Agent": _an, "Reputation": _rv})
+            for _a in _run.get("agents", []):
+                _agent_types[_a["name"]] = _a.get("type", "benign")
+                _rep_val = _a.get("maintainer_reputation") if _a.get("maintainer_reputation") is not None else _a.get("final_reputation", 0)
+                _all_final.setdefault(_a["name"], []).append(_rep_val)
 
-        color_map = {}
-        benign_blues  = ["#58a6ff", "#79c0ff", "#388bfd", "#1f6feb", "#0d419d"]
-        sybil_reds    = ["#f85149", "#ff7b72", "#ffa198", "#ff4040", "#cc2222"]
-        b_idx = s_idx = 0
-        for name, atype in agent_types.items():
-            if atype == "benign":
-                color_map[name] = benign_blues[b_idx % len(benign_blues)]
-                b_idx += 1
+        if not _all_rep_rows:
+            st.info("No reputation data for this model in the selected runs.")
+            continue
+
+        # Average reputation per (Agent, Round) across runs
+        df_rep = (
+            pd.DataFrame(_all_rep_rows)
+            .groupby(["Agent", "Round"], as_index=False)["Reputation"].mean()
+        )
+
+        # Build color map
+        _color_map = {}
+        _b, _s = 0, 0
+        for _n, _t in _agent_types.items():
+            if _t == "benign":
+                _color_map[_n] = benign_blues[_b % len(benign_blues)]; _b += 1
             else:
-                color_map[name] = sybil_reds[s_idx % len(sybil_reds)]
-                s_idx += 1
+                _color_map[_n] = sybil_reds[_s % len(sybil_reds)]; _s += 1
 
         col_line, col_final = st.columns([3, 2])
 
         with col_line:
-            st.markdown(f'<div class="section-header">Reputation Over Time — {model_name}</div>', unsafe_allow_html=True)
-
+            st.markdown('<div class="section-header">Reputation Over Time</div>', unsafe_allow_html=True)
             fig_rep = px.line(
                 df_rep, x="Round", y="Reputation", color="Agent",
-                color_discrete_map=color_map,
-                markers=True,
-                line_shape="spline",
-                range_y=[0, 1],
+                color_discrete_map=_color_map,
+                markers=True, line_shape="spline", range_y=[0, 1],
             )
-            fig_rep.add_hrect(y0=0.6, y1=1.0, fillcolor="rgba(63,185,80,0.05)",
-                              line_width=0, annotation_text="Trust zone", annotation_position="top left",
+            fig_rep.add_hrect(y0=0.6, y1=1.0, fillcolor="rgba(63,185,80,0.05)", line_width=0,
+                              annotation_text="Trust zone", annotation_position="top left",
                               annotation_font_color="#3fb950")
-            fig_rep.add_hrect(y0=0, y1=0.4, fillcolor="rgba(248,81,73,0.05)",
-                              line_width=0, annotation_text="Danger zone", annotation_position="bottom left",
+            fig_rep.add_hrect(y0=0, y1=0.4, fillcolor="rgba(248,81,73,0.05)", line_width=0,
+                              annotation_text="Danger zone", annotation_position="bottom left",
                               annotation_font_color="#f85149")
-            fig_rep.add_hline(y=0.6, line_dash="dash", line_color="#3fb950", line_width=1.5,
-                              annotation_text="", annotation_position="right")
+            fig_rep.add_hline(y=0.6, line_dash="dash", line_color="#3fb950", line_width=1.5)
             fig_rep.add_hline(y=0.4, line_dash="dash", line_color="#f85149", line_width=1.5)
             fig_rep.update_traces(line_width=2.5, marker_size=8)
             fig_rep.update_layout(
-                **PLOTLY_DARK,
-                margin=CHART_MARGIN,
-                height=400,
+                **PLOTLY_DARK, margin=CHART_MARGIN, height=400,
                 xaxis=dict(gridcolor="#30363d", dtick=1),
                 yaxis=dict(gridcolor="#30363d", tickformat=".0%"),
                 legend=dict(font_color="#c9d1d9", bgcolor="#161b22", bordercolor="#30363d"),
             )
-            # Distinguish sybil agents with dashed lines
-            for trace in fig_rep.data:
-                if color_map.get(trace.name) in sybil_reds:
-                    trace.line.dash = "dot"
+            for _trace in fig_rep.data:
+                if _color_map.get(_trace.name) in sybil_reds:
+                    _trace.line.dash = "dot"
             st.plotly_chart(fig_rep, use_container_width=True)
-            st.caption("— Solid = Benign agents · · · Dotted = Sybil attackers")
+            st.caption("— Solid = Benign · · · Dotted = Sybil")
 
         with col_final:
-            st.markdown('<div class="section-header">Final Reputation</div>', unsafe_allow_html=True)
-
-            final_agents = run.get("agents", [])
-            if final_agents:
-                # Prefer maintainer_reputation (matches terminal output) if available
-                for a in final_agents:
-                    if a.get("maintainer_reputation") is not None:
-                        a["display_reputation"] = a["maintainer_reputation"]
-                    else:
-                        a["display_reputation"] = a["final_reputation"]
-                df_fa = pd.DataFrame(final_agents).sort_values("display_reputation", ascending=True)
-                bar_colors = [color_map.get(n, "#8b949e") for n in df_fa["name"]]
+            st.markdown('<div class="section-header">Final Reputation (avg)</div>', unsafe_allow_html=True)
+            _fa_rows = [{"name": _n, "display_reputation": sum(_vs)/len(_vs)}
+                        for _n, _vs in _all_final.items() if _vs]
+            if _fa_rows:
+                df_fa = pd.DataFrame(_fa_rows).sort_values("display_reputation", ascending=True)
+                _bar_colors = [_color_map.get(_n, "#8b949e") for _n in df_fa["name"]]
                 fig_final = go.Figure(go.Bar(
-                    x=df_fa["display_reputation"],
-                    y=df_fa["name"],
-                    orientation="h",
-                    marker_color=bar_colors,
-                    marker_line_width=0,
+                    x=df_fa["display_reputation"], y=df_fa["name"],
+                    orientation="h", marker_color=_bar_colors, marker_line_width=0,
                     text=[f"{v:.0%}" for v in df_fa["display_reputation"]],
-                    textposition="outside",
-                    textfont=dict(color="#c9d1d9", size=11),
+                    textposition="outside", textfont=dict(color="#c9d1d9", size=11),
                 ))
                 fig_final.add_vline(x=0.6, line_dash="dash", line_color="#3fb950", line_width=1.5)
                 fig_final.add_vline(x=0.4, line_dash="dash", line_color="#f85149", line_width=1.5)
                 fig_final.update_layout(
-                    **PLOTLY_DARK,
-                    margin=dict(l=20, r=60, t=20, b=20),
-                    height=400,
+                    **PLOTLY_DARK, margin=dict(l=20, r=60, t=20, b=20), height=400,
                     xaxis=dict(range=[0, 1.1], gridcolor="#30363d", tickformat=".0%"),
                     yaxis=dict(gridcolor="#30363d"),
                 )
                 st.plotly_chart(fig_final, use_container_width=True)
 
-        # ── Reputation heatmap ──
         st.markdown('<div class="section-header">Reputation Heatmap</div>', unsafe_allow_html=True)
-
-        df_pivot = df_rep.pivot(index="Agent", columns="Round", values="Reputation")
-        # Sort: benign on top, sybil at bottom
-        agent_order = (
-            [n for n, t in agent_types.items() if t == "benign"] +
-            [n for n, t in agent_types.items() if t != "benign"]
+        df_pivot = df_rep.pivot_table(index="Agent", columns="Round", values="Reputation", aggfunc="mean")
+        _agent_order = (
+            [_n for _n, _t in _agent_types.items() if _t == "benign"] +
+            [_n for _n, _t in _agent_types.items() if _t != "benign"]
         )
-        df_pivot = df_pivot.reindex([a for a in agent_order if a in df_pivot.index])
-
+        df_pivot = df_pivot.reindex([_a for _a in _agent_order if _a in df_pivot.index])
+        _n_benign = sum(1 for _t in _agent_types.values() if _t == "benign")
         fig_heat = go.Figure(go.Heatmap(
             z=df_pivot.values,
             x=[f"R{c}" for c in df_pivot.columns],
             y=df_pivot.index.tolist(),
-            colorscale=[
-                [0.0, "#f85149"],
-                [0.4, "#d29922"],
-                [0.6, "#3fb950"],
-                [1.0, "#58a6ff"],
-            ],
+            colorscale=[[0.0,"#f85149"],[0.4,"#d29922"],[0.6,"#3fb950"],[1.0,"#58a6ff"]],
             zmin=0, zmax=1,
-            text=[[f"{v:.2f}" for v in row] for row in df_pivot.values],
-            texttemplate="%{text}",
-            textfont_size=11,
-            showscale=True,
-            colorbar=dict(
-                tickformat=".0%",
-                tickcolor="#8b949e",
-                outlinecolor="#30363d",
-            ),
+            text=[[f"{v:.2f}" if not pd.isna(v) else "" for v in row] for row in df_pivot.values],
+            texttemplate="%{text}", textfont_size=11, showscale=True,
+            colorbar=dict(tickformat=".0%", tickcolor="#8b949e", outlinecolor="#30363d"),
         ))
-        # Add a horizontal separator between benign and sybil
-        n_benign = sum(1 for t in agent_types.values() if t == "benign")
-        fig_heat.add_hline(
-            y=n_benign - 0.5,
-            line_color="#30363d",
-            line_width=2,
-            line_dash="solid",
-        )
+        fig_heat.add_hline(y=_n_benign - 0.5, line_color="#30363d", line_width=2, line_dash="solid")
         fig_heat.update_layout(
-            **PLOTLY_DARK,
-            margin=dict(l=20, r=20, t=20, b=20),
-            height=300,
-            xaxis=dict(side="top"),
-            yaxis=dict(autorange="reversed"),
+            **PLOTLY_DARK, margin=dict(l=20, r=20, t=20, b=20), height=300,
+            xaxis=dict(side="top"), yaxis=dict(autorange="reversed"),
         )
         st.plotly_chart(fig_heat, use_container_width=True)
-        st.caption("Top section: benign agents · Bottom section: sybil attackers · Color = trust level")
-
-    else:
-        st.info("No round-level reputation data in this run file.")
+        st.caption("Top = benign · Bottom = sybil · Color = trust level")
+        st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -866,44 +939,101 @@ with tab_reputation:
 
 with tab_prs:
 
-    run_choice_pr = st.selectbox(
-        "Select run",
-        options=[run_label(r) for r in selected_runs],
-        key="pr_run",
-        label_visibility="collapsed",
-    )
-    run_pr = next(r for r in selected_runs if run_label(r) == run_choice_pr)
-    pr_log = run_pr.get("pr_log", [])
+    # Combine pr_logs from all selected runs, tagging each row with its run label
+    _all_pr_rows = []
+    for _r in selected_runs:
+        for _p in _r.get("pr_log", []):
+            row = dict(_p)
+            row["_run"] = run_label(_r)
+            row["_model"] = _r["meta"]["model"].upper()
+            _all_pr_rows.append(row)
 
-    if pr_log:
-        df_pr = pd.DataFrame(pr_log)
+    if _all_pr_rows:
+        df_pr = pd.DataFrame(_all_pr_rows)
 
-        # ── Mini stats row ──
-        col_d, col_a, col_r, col_fp = st.columns(4)
-        with col_d:
-            st.metric("Total PRs", len(df_pr))
-        with col_a:
-            st.metric("Approved", int((df_pr["decision"].str.lower() == "approve").sum()))
-        with col_r:
-            st.metric("Rejected", int(df_pr["decision"].str.lower().isin(["reject","block_agent"]).sum()))
-        with col_fp:
-            st.metric("False Positives", int(df_pr["was_false_positive"].sum()))
+        # ── Ensure all expected columns exist with safe defaults ──────────────
+        def _bool_col(df, col):
+            if col in df.columns:
+                return df[col].fillna(False).astype(bool)
+            return pd.Series(False, index=df.index)
 
-        st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
+        _in_attack  = _bool_col(df_pr, "in_attack_mode")
+        _is_mal     = _bool_col(df_pr, "is_malicious")
+        _atype_bad = (
+            df_pr["agent_type"].fillna("").str.lower().isin(["sybil", "malicious"])
+            if "agent_type" in df_pr.columns
+            else pd.Series(False, index=df_pr.index)
+        )
+        df_pr["is_attack"] = _in_attack | _is_mal | _atype_bad
+
+        _dec_lower = df_pr["decision"].fillna("").str.lower()
+        _approved  = _dec_lower == "approve"
+        _rejected  = _dec_lower.isin(["reject", "block_agent"])
+
+        # FP = benign agent's PR rejected; FN = actively-attacking PR approved
+        _is_benign = (
+            df_pr["agent_type"].fillna("").str.lower() == "benign"
+            if "agent_type" in df_pr.columns
+            else pd.Series(True, index=df_pr.index)
+        )
+        df_pr["was_false_positive"] = _is_benign & _rejected
+        df_pr["was_false_negative"] = _bool_col(df_pr, "in_attack_mode") & _approved
+
+        # Fill missing numeric/display columns
+        for _col, _default in [("trust_score", 0.0), ("approvals", 0), ("rejections", 0),
+                                ("pr_number", ""), ("agent", ""), ("agent_type", ""),
+                                ("round", 0)]:
+            if _col not in df_pr.columns:
+                df_pr[_col] = _default
+
+        # ── Bento metric tiles ──
+        _pr_total    = len(df_pr)
+        _pr_approved = int(_approved.sum())
+        _pr_rejected = int(_rejected.sum())
+        _pr_fp       = int(df_pr["was_false_positive"].sum())
+        st.markdown(f"""
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                        padding:16px 18px;border-top:2px solid #58a6ff;">
+                <div style="font-size:1.9rem;font-weight:800;color:#58a6ff;line-height:1;">{_pr_total}</div>
+                <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                            letter-spacing:1px;margin-top:5px;">Total PRs</div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                        padding:16px 18px;border-top:2px solid #3fb950;">
+                <div style="font-size:1.9rem;font-weight:800;color:#3fb950;line-height:1;">{_pr_approved}</div>
+                <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                            letter-spacing:1px;margin-top:5px;">Approved</div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                        padding:16px 18px;border-top:2px solid #f85149;">
+                <div style="font-size:1.9rem;font-weight:800;color:#f85149;line-height:1;">{_pr_rejected}</div>
+                <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                            letter-spacing:1px;margin-top:5px;">Rejected</div>
+            </div>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;
+                        padding:16px 18px;border-top:2px solid #ffa657;">
+                <div style="font-size:1.9rem;font-weight:800;color:#ffa657;line-height:1;">{_pr_fp}</div>
+                <div style="font-size:0.58rem;color:#8b949e;text-transform:uppercase;
+                            letter-spacing:1px;margin-top:5px;">False Positives</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         col_pie, col_trust = st.columns(2)
+
+        dec_color_map = {
+            "approve": "#3fb950", "reject": "#f85149",
+            "block_agent": "#ff7b72", "pending": "#8b949e",
+            # legacy uppercase keys from older run files
+            "APPROVE": "#3fb950", "REJECT": "#f85149",
+            "BLOCK_AGENT": "#ff7b72", "PENDING": "#8b949e",
+        }
 
         with col_pie:
             st.markdown('<div class="section-header">Decision Distribution</div>', unsafe_allow_html=True)
             dec_counts = df_pr["decision"].value_counts().reset_index()
             dec_counts.columns = ["Decision", "Count"]
-            dec_color_map = {
-                "approve": "#3fb950", "reject": "#f85149",
-                "block_agent": "#ff7b72", "pending": "#8b949e",
-                # legacy uppercase keys from older run files
-                "APPROVE": "#3fb950", "REJECT": "#f85149",
-                "BLOCK_AGENT": "#ff7b72", "PENDING": "#8b949e",
-            }
             fig_pie = px.pie(
                 dec_counts, names="Decision", values="Count",
                 color="Decision", color_discrete_map=dec_color_map,
@@ -925,65 +1055,98 @@ with tab_prs:
 
         with col_trust:
             st.markdown('<div class="section-header">Trust Score Distribution</div>', unsafe_allow_html=True)
-            fig_hist = px.histogram(
-                df_pr, x="trust_score", color="decision", nbins=20,
-                color_discrete_map=dec_color_map,
-                barmode="overlay",
-                opacity=0.75,
-            )
-            fig_hist.update_layout(
-                **PLOTLY_DARK,
-                margin=CHART_MARGIN,
-                height=300,
-                xaxis=dict(title="Trust Score", gridcolor="#30363d"),
-                yaxis=dict(title="Count", gridcolor="#30363d"),
-                legend=dict(font_color="#c9d1d9", bgcolor="rgba(0,0,0,0)"),
-            )
-            st.plotly_chart(fig_hist, use_container_width=True)
+            if df_pr["trust_score"].notna().any() and (df_pr["trust_score"] != 0).any():
+                fig_hist = px.histogram(
+                    df_pr, x="trust_score", color="decision", nbins=20,
+                    color_discrete_map=dec_color_map,
+                    barmode="overlay",
+                    opacity=0.75,
+                )
+                fig_hist.update_layout(
+                    **PLOTLY_DARK,
+                    margin=CHART_MARGIN,
+                    height=300,
+                    xaxis=dict(title="Trust Score", gridcolor="#30363d"),
+                    yaxis=dict(title="Count", gridcolor="#30363d"),
+                    legend=dict(font_color="#c9d1d9", bgcolor="rgba(0,0,0,0)"),
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
+            else:
+                st.info("No trust score data in the selected runs.")
 
-        # ── Filters ──
-        st.markdown('<div class="section-header">Filter PR Log</div>', unsafe_allow_html=True)
-        col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 1, 1])
-        with col_f1:
-            filter_decision = st.multiselect(
-                "Decision", options=df_pr["decision"].unique().tolist(),
-                default=df_pr["decision"].unique().tolist()
-            )
-        with col_f2:
-            filter_attack = st.multiselect(
-                "Attack mode", options=[True, False], default=[True, False]
-            )
-        with col_f3:
-            filter_fp = st.checkbox("False positives only")
-        with col_f4:
-            filter_fn = st.checkbox("False negatives only")
+        # ── Summary counts ──
+        _total_fp = int(df_pr["was_false_positive"].sum())
+        _total_fn = int(df_pr["was_false_negative"].sum())
+        _total_atk = int(df_pr["is_attack"].sum())
 
-        mask = (
-            df_pr["decision"].isin(filter_decision)
-            & df_pr["in_attack_mode"].isin(filter_attack)
-        )
-        if filter_fp:
-            mask &= df_pr["was_false_positive"]
-        if filter_fn:
-            mask &= df_pr["was_false_negative"]
+        with st.container(border=True):
+            st.markdown('<div class="section-header">Filter PR Log</div>', unsafe_allow_html=True)
+            col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 1, 1])
 
-        df_display = df_pr[mask][[
-            "round", "pr_number", "agent", "agent_type", "in_attack_mode",
-            "decision", "trust_score", "approvals", "rejections",
-            "was_false_positive", "was_false_negative",
-        ]].rename(columns={
-            "round": "Round", "pr_number": "PR#", "agent": "Agent",
-            "agent_type": "Type", "in_attack_mode": "Attack?",
-            "decision": "Decision", "trust_score": "Trust",
-            "approvals": "Approvals", "rejections": "Rejections",
-            "was_false_positive": "FP", "was_false_negative": "FN",
-        })
+            _dec_opts = sorted(df_pr["decision"].fillna("").str.lower().unique().tolist())
+            # Sanitize stale multiselect state to avoid StreamlitAPIException
+            if "pr_filter_dec" in st.session_state:
+                st.session_state["pr_filter_dec"] = [
+                    v for v in st.session_state["pr_filter_dec"] if v in _dec_opts
+                ]
+            with col_f1:
+                filter_decision = st.multiselect(
+                    "Decision", options=_dec_opts, default=_dec_opts,
+                    key="pr_filter_dec",
+                )
+            with col_f2:
+                filter_attack = st.radio(
+                    "PR type", options=["All", "Attack only", "Normal only"],
+                    horizontal=True,
+                    key="pr_filter_attack",
+                )
+            with col_f3:
+                filter_fp = st.checkbox(
+                    "FP only",
+                    help=f"Benign PRs rejected by the model ({_total_fp} total)",
+                    key="pr_filter_fp",
+                )
+            with col_f4:
+                filter_fn = st.checkbox(
+                    "FN only",
+                    help=f"Attack PRs approved by the model ({_total_fn} total)",
+                    key="pr_filter_fn",
+                )
 
-        st.dataframe(df_display, use_container_width=True, height=400)
-        st.caption(f"Showing {len(df_display)} of {len(df_pr)} PRs")
+            # Build mask — start with all True, then narrow down
+            mask = pd.Series(True, index=df_pr.index)
+            if filter_decision:
+                mask &= df_pr["decision"].fillna("").str.lower().isin(filter_decision)
+            if filter_attack == "Attack only":
+                mask &= df_pr["is_attack"]
+            elif filter_attack == "Normal only":
+                mask &= ~df_pr["is_attack"]
+            if filter_fp:
+                mask &= df_pr["was_false_positive"]
+            if filter_fn:
+                mask &= df_pr["was_false_negative"]
+
+            _display_cols = ["_run", "round", "pr_number", "agent", "agent_type",
+                             "is_attack", "decision", "trust_score", "approvals",
+                             "rejections", "was_false_positive", "was_false_negative"]
+            _present_cols = [c for c in _display_cols if c in df_pr.columns]
+            df_display = df_pr[mask][_present_cols].copy()
+            df_display = df_display.rename(columns={
+                "_run": "Run", "round": "Round", "pr_number": "PR#",
+                "agent": "Agent", "agent_type": "Type", "is_attack": "Attack?",
+                "decision": "Decision", "trust_score": "Trust",
+                "approvals": "Approvals", "rejections": "Rejections",
+                "was_false_positive": "FP", "was_false_negative": "FN",
+            })
+
+            if df_display.empty:
+                st.info(f"No PRs match the current filters. Total in selection: {len(df_pr)} · FP={_total_fp} · FN={_total_fn}")
+            else:
+                st.dataframe(df_display, use_container_width=True, height=400)
+                st.caption(f"Showing {len(df_display)} of {len(df_pr)} · attacks={_total_atk} · FP={_total_fp} · FN={_total_fn}")
 
     else:
-        st.info("No PR log data in this run file.")
+        st.info("No PR log data in the selected runs.")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TAB 5 — Analysis
@@ -1067,7 +1230,53 @@ with tab_analysis:
             "polarizations":    polarizations,
         }
 
-    analytics = [compute_analytics(r) for r in selected_runs]
+    _per_run_analytics = [compute_analytics(r) for r in selected_runs]
+
+    # ── Aggregate per-run analytics by governance model ───────────────────────
+    from collections import defaultdict as _add
+    _model_buckets = _add(list)
+    for _a in _per_run_analytics:
+        _model_buckets[_a["model"]].append(_a)
+
+    analytics = []
+    for _mdl, _bucket in _model_buckets.items():
+        _n = len(_bucket)
+        # Scalars: average across runs
+        _det  = sum(x["detection"] for x in _bucket) / _n
+        _prod = sum(x["productivity"] for x in _bucket) / _n
+        _pol  = sum(x["avg_polarization"] for x in _bucket) / _n
+        # TTD: earliest round any run first detected
+        _ttds = [x["ttd"] for x in _bucket if x["ttd"] is not None]
+        _ttd  = min(_ttds) if _ttds else None
+        # Polarizations: all values combined
+        _pols = [p for x in _bucket for p in x["polarizations"]]
+        # round_atk: sum counts per round across runs
+        _rd_acc = {}
+        for x in _bucket:
+            for rd in x["round_atk"]:
+                r = rd["round"]
+                if r not in _rd_acc:
+                    _rd_acc[r] = {"attempted": 0, "blocked": 0, "succeeded": 0}
+                _rd_acc[r]["attempted"] += rd["attempted"]
+                _rd_acc[r]["blocked"]   += rd["blocked"]
+                _rd_acc[r]["succeeded"] += rd["succeeded"]
+        _round_atk = [
+            {**{"round": r}, **counts,
+             "success_rate": counts["succeeded"] / counts["attempted"] if counts["attempted"] > 0 else 0}
+            for r, counts in sorted(_rd_acc.items())
+        ]
+        # trust_at_attack: average per agent across runs
+        _trust_acc = {}
+        for x in _bucket:
+            for agent, rep in x["trust_at_attack"].items():
+                _trust_acc.setdefault(agent, []).append(rep)
+        _trust = {ag: sum(vs) / len(vs) for ag, vs in _trust_acc.items()}
+
+        analytics.append({
+            "model": _mdl, "detection": _det, "productivity": _prod,
+            "ttd": _ttd, "round_atk": _round_atk, "trust_at_attack": _trust,
+            "avg_polarization": _pol, "polarizations": _pols,
+        })
 
     # ── 1. Security vs Productivity scatter ──────────────────────────────────
     st.markdown('<div class="section-header">1 · Security vs Productivity Trade-off</div>', unsafe_allow_html=True)
@@ -1117,9 +1326,7 @@ with tab_analysis:
     )
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
-
-    # ── 2. Time-to-first-detection ───────────────────────────────────────────
+    # ── 2 & 5. Time-to-first-detection + Vote Polarization ──────────────────
     col_ttd, col_pol = st.columns(2)
 
     with col_ttd:
@@ -1193,8 +1400,6 @@ with tab_analysis:
         )
         st.plotly_chart(fig_pol, use_container_width=True)
 
-    st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
-
     # ── 3. Attack success rate by round ──────────────────────────────────────
     st.markdown('<div class="section-header">3 · Attack Success Rate by Round</div>', unsafe_allow_html=True)
     st.caption("Did the sybil ring get more or less effective as rounds progressed?")
@@ -1255,8 +1460,6 @@ with tab_analysis:
     else:
         st.info("No attack rounds found in selected runs.")
 
-    st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
-
     # ── 4. Trust at time of attack ────────────────────────────────────────────
     st.markdown('<div class="section-header">4 · Agent Reputation When Switching to Attack Mode</div>', unsafe_allow_html=True)
     st.caption("How much trust did sybil agents accumulate before they struck?")
@@ -1312,10 +1515,9 @@ with tab_analysis:
         st.info("No attack PRs with reputation data found. Ensure sybil mode was active.")
 
     # ── Summary insight cards ─────────────────────────────────────────────────
-    st.markdown('<div class="govim-divider"></div>', unsafe_allow_html=True)
     st.markdown('<div class="section-header">Insights Summary</div>', unsafe_allow_html=True)
 
-    insight_cols = st.columns(len(analytics))
+    insight_cols = st.columns(min(len(analytics), 3))
     for col, a in zip(insight_cols, analytics):
         model = a["model"].upper()
         color = model_color(a["model"])
@@ -1363,8 +1565,8 @@ with tab_analysis:
 # ═══════════════════════════════════════════════════════════════════════════
 
 with tab_compare:
-    sybil_runs  = [r for r in all_runs if r["meta"].get("sybil_mode")]
-    normal_runs = [r for r in all_runs if not r["meta"].get("sybil_mode")]
+    sybil_runs  = [r for r in selected_runs if r["meta"].get("sybil_mode")]
+    normal_runs = [r for r in selected_runs if not r["meta"].get("sybil_mode")]
 
     if not sybil_runs or not normal_runs:
         st.info(
@@ -1406,7 +1608,7 @@ with tab_compare:
                 "merge_rate": s.get("total_merged", 0) / total_prs * 100,
             }
 
-        compare_rows = [run_to_row(r) for r in all_runs]
+        compare_rows = [run_to_row(r) for r in selected_runs]
         df_cmp = pd.DataFrame(compare_rows)
 
         # ── Detection rate grouped bar ──
